@@ -1,0 +1,26 @@
+# Build output
+/bin/
+/dist/
+/sbt
+*.exe
+*.test
+*.out
+coverage.txt
+profile.cov
+
+# Local runtime state (never commit sandboxes, logs or config)
+.sbt/
+.sbt-test/
+
+# Editor / OS noise
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
+
+# Local tooling
+.aider-desk/
+.agents/
+skills-lock.json
