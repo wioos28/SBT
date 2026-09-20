@@ -77,6 +77,28 @@ type Spec struct {
 	Interactive bool `json:"interactive,omitempty"`
 	// LogPath receives the helper's own diagnostics (never command output).
 	LogPath string `json:"log_path,omitempty"`
+
+	// WorkspaceDir is the writable workspace path inside the jail. It defaults
+	// to /workspace and must be one of the tmpfs binds in Binds.
+	WorkspaceDir string `json:"workspace_dir,omitempty"`
+	// WorkspaceIn is a host directory whose contents are copied into
+	// WorkspaceDir before the command starts, giving the session a workspace
+	// that survives across runs. The helper only ever reads it.
+	WorkspaceIn string `json:"workspace_in,omitempty"`
+	// WorkspaceOut is a host directory that receives the files the command
+	// changed inside WorkspaceDir, plus manifest.json. The helper opens it
+	// before entering the jail and the sandboxed command never gets a handle
+	// to it, so nothing the command writes can reach the host directly.
+	WorkspaceOut string `json:"workspace_out,omitempty"`
+	// WorkspaceLimitBytes is the size of the workspace tmpfs. It is reported so
+	// the UI can show real capacity without parsing Binds.
+	WorkspaceLimitBytes int64 `json:"workspace_limit_bytes,omitempty"`
+	// CaptureLimitBytes bounds how much content the helper copies out.
+	CaptureLimitBytes int64 `json:"capture_limit_bytes,omitempty"`
+	// CaptureMaxFiles bounds how many files the helper copies out. Both limits
+	// are reported to the user when they are hit; SBT never silently drops a
+	// change.
+	CaptureMaxFiles int `json:"capture_max_files,omitempty"`
 	// CreatedAt is informative only.
 	CreatedAt time.Time `json:"created_at"`
 }

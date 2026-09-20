@@ -27,6 +27,7 @@ import (
 	"os"
 	"os/exec"
 	"syscall"
+	"time"
 
 	"github.com/wioos28/sbt/internal/platform/linux/caps"
 	"github.com/wioos28/sbt/internal/platform/linux/rlimit"
@@ -60,6 +61,16 @@ func Run(specPath string, controlFD int) int {
 		report(controlFD, jailspec.Result{Stage: "jail", OK: false, Feature: "filesystem_jail", Reason: reason, Errno: err.Error()})
 		return 3
 	}
+	// The workspace handoff directories live on the host, so their descriptors
+	// must be opened before the jail is entered. They are O_CLOEXEC and are
+	// never passed to the sandboxed command: capture happens after it exits.
+	hand, err := openHandoff(spec)
+	if err != nil {
+		reason := "Sandbox initialization failed: the session workspace could not be opened. " + err.Error()
+		report(controlFD, jailspec.Result{Stage: "jail", OK: false, Feature: "workspace_handoff", Reason: reason, Errno: err.Error()})
+		return 3
+	}
+	defer hand.close()
 	if err := syscall.Chroot(spec.Rootfs); err != nil {
 		reason := "Sandbox initialization failed: chroot into the sandbox rootfs was refused. SBT has NOT started an unsafe fallback."
 		report(controlFD, jailspec.Result{Stage: "jail", OK: false, Feature: "filesystem_jail", Reason: reason, Errno: err.Error()})
@@ -72,6 +83,15 @@ func Run(specPath string, controlFD int) int {
 				return 3
 			}
 		}
+	}
+
+	// Restore the session workspace into the sandbox tmpfs. This happens before
+	// the security policy is applied and before any command exists: it only
+	// reads host data and writes into the sandbox's own tmpfs.
+	if err := hand.seedInto(workspacePath(spec)); err != nil {
+		reason := "Sandbox initialization failed: the session workspace could not be restored. " + err.Error()
+		report(controlFD, jailspec.Result{Stage: "jail", OK: false, Feature: "workspace_handoff", Reason: reason, Errno: err.Error()})
+		return 3
 	}
 
 	if spec.NoNewPrivs {
@@ -103,6 +123,7 @@ func Run(specPath string, controlFD int) int {
 	child := exec.Command(argv[0], argv[1:]...)
 	child.Env = spec.Env
 	child.Stdin, child.Stdout, child.Stderr = os.Stdin, os.Stdout, os.Stderr
+	started := time.Now()
 	if err := child.Start(); err != nil {
 		reason := "Cannot execute the command inside the sandbox: " + err.Error()
 		if errors.Is(err, exec.ErrNotFound) || errors.Is(err, os.ErrNotExist) {
@@ -123,6 +144,12 @@ func Run(specPath string, controlFD int) int {
 
 	werr := child.Wait()
 	code := exitCode(werr)
+	// Copy the changed files out of the sandbox workspace. The command is gone,
+	// so this cannot be influenced by it beyond the content it left behind; a
+	// failure here is reported and never silently ignored.
+	if err := hand.captureRun(spec, code, started); err != nil {
+		fmt.Fprintln(os.Stderr, "SBT: the sandbox changes could not be captured: "+err.Error())
+	}
 	reapOrphans()
 	signalNote(werr)
 	return code
