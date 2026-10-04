@@ -64,7 +64,7 @@ func NewApp(in, out *os.File) (*App, error) {
 		return nil, err
 	}
 	w, h := screen.Size()
-	theme := NewTheme(DefaultPalette)
+	theme := NewThemeAuto()
 	screen.SetTheme(theme)
 	state := NewUIState(w, h)
 	state.Commands = DefaultCommands()
@@ -115,11 +115,35 @@ func (a *App) Emit(r Request) {
 // needsFrames reports whether the cage has something that visibly changes over
 // time. When it does not, the loop slows to a heartbeat and the terminal is
 // left alone.
+//
+// The check has to be honest in both directions. Reporting "always animating"
+// whenever motion is enabled makes the loop repaint ten times a second on a
+// completely idle session, which is wasted work and a measurable battery cost
+// for an interface nobody is looking at; reporting "never animating" would
+// freeze the spinner while a sandbox starts. So each moving part is named.
 func (a *App) needsFrames() bool {
 	if !a.State.Motion {
 		return a.State.Busy.Active || len(a.State.Toasts.Live(a.Snap.Now)) > 0
 	}
-	return true
+	if a.State.Busy.Active || len(a.State.Toasts.Live(a.Snap.Now)) > 0 {
+		return true
+	}
+	// A view that is still easing in is visibly moving.
+	if p := a.State.Transition.Progress(a.Snap.Now); p < 1 {
+		return true
+	}
+	// An open menu eases its highlight in, so it is animating too.
+	if a.State.Menu.Open {
+		return true
+	}
+	// A meter that has not reached its target is still travelling.
+	m := a.State.Meters
+	now := a.Snap.Now
+	if !m.CPU.Settled(now, true) || !m.Memory.Settled(now, true) || !m.Procs.Settled(now, true) {
+		return true
+	}
+	// Everything else is still: a settled interface is left alone.
+	return false
 }
 
 // runFrame advances the clocks, draws one frame and hands it to the screen.
@@ -129,6 +153,15 @@ func (a *App) runFrame(now time.Time) {
 	a.State.Toasts.Expire(now)
 	if a.State.Busy.Since.IsZero() {
 		a.State.Busy.Since = now
+	}
+	// The theme follows the snapshot's choice, so a toggle takes effect on the
+	// very next frame instead of waiting for a restart. The screen is told the
+	// theme changed too, because it caches the escape sequences it emits.
+	if a.Theme != nil && a.Theme.Light != a.Snap.Light {
+		a.Theme.SetLight(a.Snap.Light)
+		a.Interp.Theme = a.Theme
+		a.Screen.SetTheme(a.Theme)
+		a.Screen.Invalidate()
 	}
 	if a.OnFrame != nil {
 		a.OnFrame(&a.Snap)
@@ -202,14 +235,25 @@ func (a *App) readKey(ctx context.Context) (readResult, bool) {
 
 // apply turns an event into state changes and session requests. It reports
 // whether the session should close.
+//
+// The split matters: this method decides what the UI *says*, and the session
+// decides what actually *happens*. A request is only ever queued here, never
+// performed, so no key press can reach the kernel from this file.
 func (a *App) apply(ev event, now time.Time) bool {
 	switch ev.kind {
 	case evRun:
 		a.State.Busy = Busy{Active: true, Label: "starting sandbox", Since: now}
 		a.State.flash("running "+joinArgs(ev.argv)+" in a fresh sandbox", StateOK, now)
 		a.Emit(Request{Kind: ReqRun, Argv: ev.argv})
+	case evStop:
+		// Stopping is worth stating: the sandbox owns the terminal until it is
+		// gone, and the user pressed a key to ask for that.
+		a.State.flash("stopping the sandbox…", StateWarn, now)
+		a.Emit(Request{Kind: ReqStop})
 	case evSetPolicy:
 		a.Emit(Request{Kind: ReqSetPolicy, Policy: policyFor(ev.preset)})
+	case evOpenPolicy:
+		a.Emit(Request{Kind: ReqOpenPolicy, Choice: PolicyHigh})
 	case evExport:
 		a.Emit(Request{Kind: ReqExport, Paths: ev.paths, Destination: ev.dest, Overwrite: ev.overwrite})
 	case evDiscard:
@@ -217,10 +261,15 @@ func (a *App) apply(ev event, now time.Time) bool {
 	case evRefresh:
 		a.State.flash("re-checking the platform report…", StateMeta, now)
 		a.Emit(Request{Kind: ReqRefresh})
+	case evDiff:
+		a.Emit(Request{Kind: ReqDiff, RunID: ev.runID, Entry: ev.entry})
 	case evExit:
 		a.Emit(Request{Kind: ReqExit})
 		return true
-	case evStop, evNone, evHandled:
+	case evSetDest:
+		a.State.Export.Destination = ev.dest
+		a.State.flash("export destination set", StateOK, now)
+	case evDropDiff, evNone, evHandled:
 	}
 	return false
 }

@@ -55,6 +55,9 @@ func probeOverlay(root string) (Feature, bool) {
 	if err != nil {
 		return Feature{Level: Partial, Reason: "overlayfs mounted but writes failed: " + err.Error()}, true
 	}
+	// SBT probes overlayfs to decide whether a copy-on-write workspace is
+	// possible, then deliberately does not use it. The reasons are recorded in
+	// docs/LIMITATIONS.md.
 	return Feature{Level: Partial, Reason: "overlayfs available with a memory-backed upper; SBT v" + version.Version + " does not use it (see docs/LIMITATIONS.md)"}, true
 }
 

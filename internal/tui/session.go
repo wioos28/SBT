@@ -39,6 +39,8 @@ type Session struct {
 	runner Runner
 	// preset is the policy applied to the next sandbox.
 	preset policy.Preset
+	// diff is the most recently loaded review content.
+	diff DiffState
 
 	// host is the hostname shown in the top bar, resolved once.
 	host string
@@ -75,7 +77,16 @@ func (s *Session) SetSampler(smp *monitor.Sampler) { s.sampler = smp }
 func (s *Session) SetRunner(r Runner) { s.runner = r }
 
 // SetPreset replaces the policy applied to the next sandbox.
-func (s *Session) SetPreset(p policy.Preset) { s.preset = p }
+//
+// The policy is pushed to the runner as well as stored: the badge in the top bar
+// describes the policy the next jail spec will actually carry, and a UI-only
+// policy would be a claim about a sandbox that is never configured that way.
+func (s *Session) SetPreset(p policy.Preset) {
+	s.preset = p
+	if ps, ok := s.runner.(PolicySetter); ok && ps != nil {
+		ps.SetPreset(p)
+	}
+}
 
 // Refresh re-runs the platform probe and rebuilds the isolation evidence.
 //
@@ -84,6 +95,17 @@ func (s *Session) SetPreset(p policy.Preset) { s.preset = p }
 // can change (a namespace limit is lowered, a seccomp policy is denied) while
 // SBT is open, and a stale "protected" claim would be a lie.
 func (s *Session) Refresh() { s.caps = platform.Detect() }
+
+// Caps returns the last platform probe report, or nil when the probe has not
+// run yet. A front end uses it to give a runner the same evidence the session
+// is displaying, so the two can never disagree.
+func (s *Session) Caps() *platform.Capabilities { return s.caps }
+
+// SnapshotInto rebuilds the Snapshot the interface is about to draw. It is the
+// same refresh the draw loop performs, exposed so a front end can prime the
+// first frame itself and so the wiring in one place decides what the interface
+// sees.
+func (s *Session) SnapshotInto(dst *Snapshot) { s.snapshotInto(dst) }
 
 // snapshotInto rebuilds the Snapshot from the current session state. It is
 // called before every frame, so it must stay cheap and must never fail a
@@ -126,6 +148,24 @@ func (s *Session) snapshotInto(dst *Snapshot) {
 		if runs, err := s.store.Runs(); err == nil {
 			dst.Runs = runs
 		}
+		// The journal ids are read alongside the runs so the two stay parallel:
+		// the review view addresses a run by its directory, never by its
+		// position in the list.
+		if ids, err := s.store.RunIDs(); err == nil {
+			dst.RunIDs = ids
+		}
+	}
+	// The live sandbox state comes from the runner when it can report it. A
+	// runner that cannot leaves the field zero, which renders as "idle" - not
+	// as a claim that a sandbox is running.
+	if sr, ok := s.runner.(StateReader); ok && sr != nil {
+		dst.Sandbox = sr.State()
+	}
+	// The diff is only replaced when the session was asked for one; otherwise
+	// the previously loaded content stays on screen while the user moves the
+	// cursor back to it.
+	if s.diff.Loaded {
+		dst.Diff = s.diff
 	}
 }
 
@@ -195,6 +235,13 @@ func cageVerdict(c *platform.Capabilities, preset policy.Preset) Cage {
 var versionString = func() string { return "" }
 
 // SetVersionString installs the version reported by the binary.
+//
+// It exists so the renderer does not have to import internal/version: the
+// interface can draw, but it should not need to know what it is. A front end
+// that forgets to call it simply shows an empty identity rather than a wrong
+// one.
+func SetVersionString(v string) { versionString = func() string { return v } }
+
 // Runner is what a Session needs in order to actually run a command. It is an
 // interface so the session can be tested without a kernel, and so the security
 // decision of "may this run" stays in one implementation.
@@ -210,6 +257,43 @@ type Runner interface {
 	Export(paths []string, dest string, overwrite bool) error
 	// Discard deletes the session workspace.
 	Discard() error
+}
+
+// StateReader is implemented by a Runner that can report what its sandbox is
+// doing right now.
+//
+// It is a separate, optional interface rather than part of Runner so the
+// session still works with a minimal implementation - a test double needs no
+// process state - while the real runner can report that a sandbox is running.
+type StateReader interface {
+	// State describes the sandbox the session is currently attached to.
+	State() SandboxState
+}
+
+// DiffReader is implemented by a Runner that can read a finished run's content.
+// The session needs it for the review view: the journal's before/after files
+// are the only record of what a sandbox actually wrote.
+type DiffReader interface {
+	// Diff loads one path's before/after content from one run.
+	Diff(runID, path string) (DiffState, error)
+}
+
+// StateSetter is implemented by a Runner that needs to be told when the
+// platform report changes.
+//
+// It matters because the probe can be re-run while the session is open: a runner
+// that kept the first report would keep starting sandboxes on a stale verdict.
+type StateSetter interface {
+	// SetCaps installs the current platform report.
+	SetCaps(*platform.Capabilities)
+}
+
+// PolicySetter is implemented by a Runner that applies a policy to the sandbox
+// it is about to start. Without it the UI's policy badge would describe a knob
+// the jail spec never received.
+type PolicySetter interface {
+	// SetPreset installs the policy for the next sandbox.
+	SetPreset(policy.Preset)
 }
 
 // Handle executes one Request from the App.
@@ -250,11 +334,44 @@ func (s *Session) Handle(ctx context.Context, req Request) {
 		ui.Toasts.Notify(StateMeta, "workspace discarded", "every change was deleted", now)
 	case ReqRefresh:
 		s.Refresh()
+		if sr, ok := s.runner.(StateSetter); ok && sr != nil {
+			sr.SetCaps(s.caps)
+		}
 		ui.Toasts.Notify(StateOK, "platform report refreshed",
 			cageVerdict(s.caps, s.preset).State.Label(), now)
+	case ReqDiff:
+		s.diffRequest(req, now)
+	case ReqOpenPolicy:
+		s.SetPreset(policyFor(req.Choice))
 	case ReqResize, ReqExit:
 		// Handled by the loop: resize is observed by the screen, exit ends Run.
 	}
+}
+
+// diffRequest loads one path's before/after content for the review view.
+//
+// The UI never reads files: it asks for a run and a path, and the session - the
+// only component that knows where runs are stored - answers. A load that fails
+// still produces a DiffState, carrying the reason, because a pane that silently
+// shows nothing reads as "this file did not change".
+func (s *Session) diffRequest(req Request, now time.Time) {
+	dr, ok := s.runner.(DiffReader)
+	if !ok || dr == nil {
+		s.diff = DiffState{RunID: req.RunID, Path: req.Entry, Loaded: true,
+			Note: "this session cannot review file content"}
+		return
+	}
+	if req.Entry == "" {
+		return
+	}
+	diff, err := dr.Diff(req.RunID, req.Entry)
+	if err != nil {
+		s.diff = DiffState{RunID: req.RunID, Path: req.Entry, Loaded: true,
+			Note: err.Error()}
+		return
+	}
+	diff.Loaded = true
+	s.diff = diff
 }
 
 // runRequest applies the policy checks and then runs the command.

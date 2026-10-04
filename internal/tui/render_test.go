@@ -4,6 +4,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/wioos28/sbt/internal/shared/workspace"
 )
 
 // A meter rises smoothly rather than jumping, and a fall is immediate.
@@ -188,6 +190,66 @@ func TestRenderNeverPanics(t *testing.T) {
 			st.View = view
 			renderText(sz[0], sz[1], &snap, st)
 		}
+	}
+}
+
+// The new surfaces must survive the same sweep as the rest: an open menu, an
+// open diff and a full run history are all reachable states, and a panic in any
+// of them would end a real session.
+func TestRenderSurvivesMenuAndDiffAtEveryGeometry(t *testing.T) {
+	sizes := [][2]int{
+		{20, 5}, {24, 8}, {40, 10}, {62, 20}, {80, 24}, {100, 30}, {120, 40}, {200, 60},
+	}
+	for _, sz := range sizes {
+		for _, bar := range []int{-1, 0, 2, 4} {
+			snap := baseSnapshot()
+			snap.WorkspaceDir = "/tmp/ws"
+			snap.Runs = []workspace.Run{{
+				Command: []string{"sh", "-c", "echo hi"},
+				Entries: []workspace.Entry{
+					{Path: "notes.txt", Kind: workspace.Added},
+					{Path: "gone.txt", Kind: workspace.Deleted},
+				},
+			}}
+			snap.RunIDs = []string{"run-0001"}
+			snap.Diff = DiffState{
+				RunID: "run-0001", Path: "notes.txt", Loaded: true,
+				Lines: []string{"+ hi", "  context", "- old"},
+			}
+			st := newState(sz[0], sz[1])
+			st.View = ViewChanges
+			st.DiffOpen = true
+			st.Menu.Open = true
+			st.Menu.Bar = bar
+			st.Changes.Row = 1
+			renderText(sz[0], sz[1], &snap, st)
+		}
+	}
+}
+
+// A menu whose cursor is out of range must not index past its own rows. Indices
+// can go stale when the bar is swapped, and a panic is not an acceptable way to
+// find out.
+func TestMenuClampsAnOutOfRangeCursor(t *testing.T) {
+	st := newState(120, 40)
+	bar := st.Menus
+	st.Menu.Bar = 99
+	st.Menu.Cursor = 99
+	st.Menu.Clamp(bar)
+	if st.Menu.Bar >= len(bar.Menus) {
+		t.Fatalf("the bar index must be clamped, got %d", st.Menu.Bar)
+	}
+	if items := st.Menu.Items(bar); st.Menu.Cursor >= len(items) {
+		t.Fatalf("the cursor must be clamped, got %d of %d", st.Menu.Cursor, len(items))
+	}
+	// An empty bar must not leave a stale selection behind.
+	st.Menus = MenuBar{}
+	st.Menu.Clamp(st.Menus)
+	if st.Menu.Open {
+		t.Fatal("an empty menu bar must close the dropdown")
+	}
+	if len(st.Menu.Items(st.Menus)) != 0 {
+		t.Fatal("an empty menu bar has no rows")
 	}
 }
 

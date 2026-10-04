@@ -3,6 +3,8 @@ package tui
 import (
 	"strings"
 	"time"
+
+	"github.com/wioos28/sbt/internal/shared/policy"
 )
 
 // NewUIState builds UI state with defaults for the current terminal.
@@ -12,6 +14,7 @@ func NewUIState(w, h int) *UIState {
 		Height:  h,
 		Motion:  motionAllowed(),
 		InitRun: true,
+		Menus:   DefaultMenuBar(),
 	}
 	return st
 }
@@ -29,7 +32,9 @@ func motionAllowed() bool {
 // CloseAll collapses every overlay and returns to the terminal view.
 func (st *UIState) CloseAll() {
 	st.Palette.Open = false
+	st.Menu.Open = false
 	st.Confirm = Confirm{Kind: ConfirmNone}
+	st.DiffOpen = false
 	st.View = ViewTerminal
 	st.Focus = focusInput
 }
@@ -54,11 +59,19 @@ type event struct {
 	dest      string
 	overwrite bool
 	preset    PolicyChoice
+	// runID and entry address one changed path for a diff request.
+	runID string
+	entry string
 }
 
 type eventKind int
 
 const (
+	// evNone is "this key was consumed and nothing needs to happen". It is the
+	// default: a key that only moves a cursor returns this, and the caller
+	// treats it as a redraw rather than an action. Keeping it distinct from
+	// evStop is what lets "stop the sandbox" be a real, bindable action
+	// instead of doubling as the no-op value.
 	evNone eventKind = iota
 	evHandled
 	evRun
@@ -70,18 +83,46 @@ const (
 	// evRefresh asks the session to re-run the platform probe. It is separate
 	// from evStop because refreshing is a state change, not a redraw.
 	evRefresh
+	// evDiff asks the session to load one path's before/after content.
+	evDiff
+	// evDropDiff closes the diff pane without leaving the changes view.
+	evDropDiff
+	// evOpenPolicy asks for the high-risk confirmation.
+	evOpenPolicy
+	// evSetDest records a typed export destination.
+	evSetDest
 )
+
+// wantsSession reports whether an event has to reach the session. Everything
+// else is presentational and stops at the UI.
+func (e event) wantsSession() bool {
+	switch e.kind {
+	case evRun, evStop, evSetPolicy, evExport, evDiscard, evExit, evRefresh, evDiff, evOpenPolicy:
+		return true
+	}
+	return false
+}
 
 // handleKey is the pure keyboard layer: one key in, one event out, plus any
 // state change that is purely presentational. Nothing here starts a process,
 // writes a file or touches the sandbox - those go through the events.
+//
+// The order of the checks is the overlay stack, from the most modal to the least:
+// a confirmation, then the palette, then the menu, then the view's own keys. The
+// most modal overlay always gets the key, which is what makes Escape reliably
+// mean "back out one step" rather than "whatever the bottom layer would do".
 func (st *UIState) handleKey(k Key, snap *Snapshot) event {
 	st.LastKeyAt = snap.Now
+	if st.Confirm.Kind != ConfirmNone {
+		return st.confirmKey(k, snap)
+	}
 	if st.Palette.Open {
 		return st.paletteKey(k, snap)
 	}
-	if st.Confirm.Kind != ConfirmNone {
-		return st.confirmKey(k, snap)
+	if st.Menu.Open {
+		if ev, ok := st.menuKey(k, snap); ok {
+			return ev
+		}
 	}
 	if st.View == ViewExport {
 		return st.exportKey(k, snap)
@@ -89,31 +130,50 @@ func (st *UIState) handleKey(k Key, snap *Snapshot) event {
 	return st.baseKey(k, snap)
 }
 
+// menuOpenKey is the single key that opens the menu bar. It is deliberately one
+// binding rather than a global "any letter opens a menu" scheme: a menu bar that
+// swallows ordinary typing is a menu bar that breaks the command input.
+func (k Key) menuOpenKey() bool {
+	return (k.Type == KeyF10) || (k.Alt && k.Type == KeyRune && k.Rune == 'm')
+}
+
 // baseKey handles keys when no overlay owns the keyboard.
 func (st *UIState) baseKey(k Key, snap *Snapshot) event {
 	switch {
+	case k.menuOpenKey():
+		st.Menu.Open = true
+		st.Menu.OpenedAt = snap.Now
+		st.Menu.Clamp(st.Menus)
+		return event{kind: evNone}
 	case k.Type == KeyRune && k.Ctrl && (k.Rune == 'k' || k.Rune == 'K'):
 		st.Palette.Open = true
 		st.Palette.Query = ""
 		st.Palette.Cursor = 0
-		return event{kind: evStop}
+		return event{kind: evNone}
 	case k.Type == KeyRune && k.Ctrl && k.Rune == 'd':
 		return st.askExit(snap)
+	case k.Type == KeyRune && k.Ctrl && k.Rune == '.':
+		// Stopping is a real action, not a side effect of moving the cursor.
+		return event{kind: evStop}
 	case k.Type == KeyEsc:
+		if st.DiffOpen {
+			st.DiffOpen = false
+			return event{kind: evNone}
+		}
 		if st.View != ViewTerminal {
 			st.SetView(ViewTerminal, snap.Now)
-			return event{kind: evStop}
+			return event{kind: evNone}
 		}
 		st.Focus = focusInput
-		return event{kind: evStop}
+		return event{kind: evNone}
 	case k.Alt && k.Type == KeyRune && k.Rune >= '1' && k.Rune <= '6':
 		st.SetView(View(k.Rune-'1'), snap.Now)
 		st.Focus = focusWorkspace
-		return event{kind: evStop}
+		return event{kind: evNone}
 	case k.Ctrl && k.Type == KeyRune && k.Rune >= '1' && k.Rune <= '6':
 		st.SetView(View(k.Rune-'1'), snap.Now)
 		st.Focus = focusWorkspace
-		return event{kind: evStop}
+		return event{kind: evNone}
 	}
 	switch st.View {
 	case ViewTerminal:
@@ -123,11 +183,66 @@ func (st *UIState) baseKey(k Key, snap *Snapshot) event {
 	case ViewChanges:
 		return st.changesKey(k, snap)
 	case ViewStatus:
-		return event{kind: evStop}
+		return event{kind: evNone}
+	case ViewHelp:
+		return event{kind: evNone}
 	case ViewExport:
 		return st.exportKey(k, snap)
 	}
-	return event{kind: evStop}
+	return event{kind: evNone}
+}
+
+// menuKey drives the open dropdown. The second result reports whether the menu
+// consumed the key; when it did not, the key falls through to the view behind
+// it, so a menu can be opened and then navigated with the same keys the user
+// already knows.
+func (st *UIState) menuKey(k Key, snap *Snapshot) (event, bool) {
+	menus := st.Menus
+	st.Menu.Clamp(menus)
+	items := st.Menu.Items(menus)
+	switch k.Type {
+	case KeyEsc:
+		st.Menu.Open = false
+		return event{kind: evNone}, true
+	case KeyLeft:
+		if len(menus.Menus) > 0 {
+			st.Menu.Bar = (st.Menu.Bar - 1 + len(menus.Menus)) % len(menus.Menus)
+			st.Menu.Cursor = 0
+		}
+		return event{kind: evNone}, true
+	case KeyRight:
+		if len(menus.Menus) > 0 {
+			st.Menu.Bar = (st.Menu.Bar + 1) % len(menus.Menus)
+			st.Menu.Cursor = 0
+		}
+		return event{kind: evNone}, true
+	case KeyUp:
+		if len(items) > 0 {
+			st.Menu.Cursor = (st.Menu.Cursor - 1 + len(items)) % len(items)
+		}
+		return event{kind: evNone}, true
+	case KeyDown:
+		if len(items) > 0 {
+			st.Menu.Cursor = (st.Menu.Cursor + 1) % len(items)
+		}
+		return event{kind: evNone}, true
+	case KeyHome:
+		st.Menu.Cursor = 0
+		return event{kind: evNone}, true
+	case KeyEnd:
+		st.Menu.Cursor = max(len(items)-1, 0)
+		return event{kind: evNone}, true
+	case KeyEnter:
+		if st.Menu.Cursor < 0 || st.Menu.Cursor >= len(items) {
+			st.Menu.Open = false
+			return event{kind: evNone}, true
+		}
+		// The menu closes before the action runs: an overlay that stays open
+		// behind a confirmation dialog reads as a rendering fault.
+		st.Menu.Open = false
+		return st.runAction(items[st.Menu.Cursor].Action, snap), true
+	}
+	return event{kind: evNone}, false
 }
 
 // terminalKey handles the terminal view: typing a command.
@@ -136,31 +251,31 @@ func (st *UIState) terminalKey(k Key, snap *Snapshot) event {
 	case KeyEnter:
 		argv := fields(st.Input)
 		if len(argv) == 0 {
-			return event{kind: evStop}
+			return event{kind: evNone}
 		}
 		st.Input = ""
 		return event{kind: evRun, argv: argv}
 	case KeyBackspace:
 		if st.Focus != focusInput {
 			st.Focus = focusInput
-			return event{kind: evStop}
+			return event{kind: evNone}
 		}
 		if st.Input != "" {
 			r := []rune(st.Input)
 			st.Input = string(r[:len(r)-1])
 		}
-		return event{kind: evStop}
+		return event{kind: evNone}
 	case KeyUp, KeyDown, KeyPgUp, KeyPgDn, KeyHome, KeyEnd:
 		// The transcript follows the newest lines; scrolling comes with the
 		// diff viewer in a later pass.
-		return event{kind: evStop}
+		return event{kind: evNone}
 	}
 	if k.Type == KeyRune && !k.Ctrl {
 		st.Focus = focusInput
 		st.Input += string(k.Rune)
-		return event{kind: evStop}
+		return event{kind: evNone}
 	}
-	return event{kind: evStop}
+	return event{kind: evNone}
 }
 
 // listKey handles the files and export lists.
@@ -189,11 +304,156 @@ func (st *UIState) listKey(k Key, snap *Snapshot, n int) event {
 	case KeyEnd:
 		st.List.Index = n - 1
 	}
-	return event{kind: evStop}
+	return event{kind: evNone}
 }
 
-// changesKey handles the changes view.
-func (st *UIState) changesKey(k Key, snap *Snapshot) event { return event{kind: evStop} }
+// changesKey handles the changes view: the list of changed paths on one side,
+// the diff of the selected path on the other.
+//
+// The list and the diff share the keyboard rather than being two separate modes
+// the user has to remember to switch between, because the review act is "read
+// this change, move to the next one". Enter opens the diff, Escape closes it,
+// and the arrow keys always move the change cursor.
+func (st *UIState) changesKey(k Key, snap *Snapshot) event {
+	rows := BuildChangeRows(snap)
+	pick := Selectable(rows)
+	// The cursor always addresses a change, never a header, so entering always
+	// has something to review.
+	if st.Changes.Row >= len(pick) {
+		st.Changes.Row = max(len(pick)-1, 0)
+	}
+	if st.Changes.Row < 0 {
+		st.Changes.Row = 0
+	}
+
+	if st.DiffOpen {
+		switch k.Type {
+		case KeyEsc:
+			st.DiffOpen = false
+			st.DiffScroll = 0
+			return event{kind: evNone}
+		case KeyEnter, KeyTab:
+			// Enter steps to the next change with its diff already open: the
+			// common case is walking a whole run in order.
+			if st.nextChange(pick) {
+				return st.currentChangeEvent(rows, pick)
+			}
+			st.DiffOpen = false
+			return event{kind: evNone}
+		case KeyUp:
+			return st.moveChange(rows, pick, -1, true)
+		case KeyDown:
+			return st.moveChange(rows, pick, 1, true)
+		case KeyPgUp:
+			st.DiffScroll = max(st.DiffScroll-10, 0)
+			return event{kind: evNone}
+		case KeyPgDn:
+			st.DiffScroll += 10
+			st.clampDiffScroll(snap)
+			return event{kind: evNone}
+		case KeyHome:
+			st.DiffScroll = 0
+			return event{kind: evNone}
+		}
+		return event{kind: evNone}
+	}
+
+	switch k.Type {
+	case KeyUp:
+		return st.moveChange(rows, pick, -1, false)
+	case KeyDown:
+		return st.moveChange(rows, pick, 1, false)
+	case KeyPgUp:
+		for n := 0; n < 10; n++ {
+			st.stepChange(pick, -1)
+		}
+		return event{kind: evNone}
+	case KeyPgDn:
+		for n := 0; n < 10; n++ {
+			st.stepChange(pick, 1)
+		}
+		return event{kind: evNone}
+	case KeyHome:
+		st.Changes.Row = 0
+		return st.currentChangeEvent(rows, pick)
+	case KeyEnd:
+		st.Changes.Row = max(len(pick)-1, 0)
+		return st.currentChangeEvent(rows, pick)
+	case KeyEnter:
+		// The pane opens only if there is a change to review. Opening an empty
+		// pane on an empty session would replace "no changes recorded" with a
+		// blank panel that says nothing about why.
+		if ev := st.currentChangeEvent(rows, pick); ev.kind == evDiff {
+			st.DiffOpen = true
+			st.DiffScroll = 0
+			return ev
+		}
+		st.flash("nothing to review yet", StateMeta, snap.Now)
+	}
+	return event{kind: evNone}
+}
+
+// currentChangeEvent asks the session for the selected change's diff.
+func (st *UIState) currentChangeEvent(rows []ChangeRow, pick []int) event {
+	if st.Changes.Row < 0 || st.Changes.Row >= len(pick) {
+		return event{kind: evNone}
+	}
+	row := rows[pick[st.Changes.Row]]
+	if row.Header || row.Entry.Path == "" {
+		return event{kind: evNone}
+	}
+	return event{kind: evDiff, runID: row.RunID, entry: row.Entry.Path}
+}
+
+// nextChange moves the cursor one change along and reports whether it moved.
+func (st *UIState) nextChange(pick []int) bool {
+	if len(pick) == 0 {
+		return false
+	}
+	if st.Changes.Row >= len(pick)-1 {
+		return false
+	}
+	st.Changes.Row++
+	return true
+}
+
+// stepChange moves the change cursor without raising a request.
+func (st *UIState) stepChange(pick []int, delta int) {
+	if len(pick) == 0 {
+		return
+	}
+	st.Changes.Row += delta
+	if st.Changes.Row < 0 {
+		st.Changes.Row = 0
+	}
+	if st.Changes.Row >= len(pick) {
+		st.Changes.Row = len(pick) - 1
+	}
+}
+
+// moveChange moves the change cursor and, when a diff is already open, loads the
+// newly selected change so the review keeps up with the cursor.
+func (st *UIState) moveChange(rows []ChangeRow, pick []int, delta int, keepDiff bool) event {
+	if len(pick) == 0 {
+		return event{kind: evNone}
+	}
+	st.stepChange(pick, delta)
+	st.DiffScroll = 0
+	if keepDiff {
+		return st.currentChangeEvent(rows, pick)
+	}
+	return event{kind: evNone}
+}
+
+// clampDiffScroll keeps the diff viewport inside the loaded content.
+func (st *UIState) clampDiffScroll(snap *Snapshot) {
+	if st.DiffScroll < 0 {
+		st.DiffScroll = 0
+	}
+	if limit := max(len(snap.Diff.Lines)-1, 0); st.DiffScroll > limit {
+		st.DiffScroll = limit
+	}
+}
 
 // paletteKey handles the command palette. Typing filters, up/down move the
 // cursor, enter runs the highlighted command.
@@ -202,23 +462,23 @@ func (st *UIState) paletteKey(k Key, snap *Snapshot) event {
 	switch k.Type {
 	case KeyEsc:
 		st.Palette.Open = false
-		return event{kind: evStop}
+		return event{kind: evNone}
 	case KeyUp:
 		if st.Palette.Cursor > 0 {
 			st.Palette.Cursor--
 		}
-		return event{kind: evStop}
+		return event{kind: evNone}
 	case KeyDown:
 		if st.Palette.Cursor < len(entries)-1 {
 			st.Palette.Cursor++
 		}
-		return event{kind: evStop}
+		return event{kind: evNone}
 	case KeyPgUp:
 		st.Palette.Cursor -= 10
 		if st.Palette.Cursor < 0 {
 			st.Palette.Cursor = 0
 		}
-		return event{kind: evStop}
+		return event{kind: evNone}
 	case KeyPgDn:
 		st.Palette.Cursor += 10
 		if st.Palette.Cursor > len(entries)-1 {
@@ -227,31 +487,31 @@ func (st *UIState) paletteKey(k Key, snap *Snapshot) event {
 		if st.Palette.Cursor < 0 {
 			st.Palette.Cursor = 0
 		}
-		return event{kind: evStop}
+		return event{kind: evNone}
 	case KeyBackspace:
 		if r := []rune(st.Palette.Query); len(r) > 0 {
 			st.Palette.Query = string(r[:len(r)-1])
 			st.Palette.Cursor = 0
 		}
-		return event{kind: evStop}
+		return event{kind: evNone}
 	case KeyEnter:
 		st.Palette.Open = false
 		if st.Palette.Cursor < 0 || st.Palette.Cursor >= len(entries) {
-			return event{kind: evStop}
+			return event{kind: evNone}
 		}
-		return st.runCommand(entries[st.Palette.Cursor].Action, snap)
+		return st.runAction(entries[st.Palette.Cursor].Action, snap)
 	}
 	if k.Type == KeyRune && !k.Ctrl {
 		st.Palette.Query += string(k.Rune)
 		st.Palette.Cursor = 0
 	}
-	return event{kind: evStop}
+	return event{kind: evNone}
 }
 
-// runCommand turns a palette selection into the same event the key bindings
-// would have produced. Going through one place is what keeps "ctrl+k exit" and
-// "exit" from ever disagreeing about what exit means.
-func (st *UIState) runCommand(a Action, snap *Snapshot) event {
+// runAction turns a menu row or a palette selection into the same event the key
+// bindings would have produced. Going through one place is what keeps "menu >
+// exit", "ctrl+k exit" and "ctrl+d" from ever disagreeing about what exit means.
+func (st *UIState) runAction(a Action, snap *Snapshot) event {
 	switch a.Kind {
 	case ActShowView:
 		st.SetView(a.View, snap.Now)
@@ -260,7 +520,7 @@ func (st *UIState) runCommand(a Action, snap *Snapshot) event {
 		argv := fields(st.Input)
 		if len(argv) == 0 {
 			st.flash("type a command first", StateWarn, snap.Now)
-			return event{kind: evStop}
+			return event{kind: evNone}
 		}
 		st.Input = ""
 		return event{kind: evRun, argv: argv}
@@ -286,9 +546,25 @@ func (st *UIState) runCommand(a Action, snap *Snapshot) event {
 		st.askDiscard(snap)
 	case ActExit:
 		return st.askExit(snap)
+	case ActStop:
+		return event{kind: evStop}
+	case ActHighRisk:
+		st.askHighRisk(snap)
 	case ActRefresh:
 		st.flash("re-checking the platform report…", StateMeta, snap.Now)
 		return event{kind: evRefresh}
+	case ActBack:
+		// Back is the keyboard's Escape, expressed as an action, so a menu row
+		// can offer it without the menu handler special-casing a key type.
+		if st.DiffOpen {
+			st.DiffOpen = false
+			st.DiffScroll = 0
+			return event{kind: evNone}
+		}
+		if st.View != ViewTerminal {
+			st.SetView(ViewTerminal, snap.Now)
+			st.Focus = focusInput
+		}
 	case ActMotion:
 		st.Motion = !st.Motion
 		if st.Motion {
@@ -296,11 +572,42 @@ func (st *UIState) runCommand(a Action, snap *Snapshot) event {
 		} else {
 			st.flash("animation off", StateOK, snap.Now)
 		}
+	case ActToggleTheme:
+		// The state records the choice; the App applies it to the live theme.
+		// Splitting it this way keeps the keyboard layer free of side effects
+		// on shared rendering state.
+		snap.Light = !snap.Light
+		ground := "dark"
+		if snap.Light {
+			ground = "light"
+		}
+		st.flash(ground+" theme", StateOK, snap.Now)
 	case ActDismissWarnings:
 		st.Toasts.Clear()
 		st.flash("warnings dismissed", StateMeta, snap.Now)
 	}
-	return event{kind: evStop}
+	return event{kind: evNone}
+}
+
+// askHighRisk opens the confirmation that relaxes the sandbox policy.
+//
+// The dialog lists the concrete knobs that change rather than showing the word
+// "high risk": a user confirms facts, not a label. It is the one dialog in SBT
+// whose dangerous choice is the LEFT button, because the left button always is -
+// position carries the meaning whether or not colour is available.
+func (st *UIState) askHighRisk(snap *Snapshot) {
+	body := []string{"the next sandbox loses guarantees SBT cannot re-add:"}
+	for _, line := range policy.Relaxed().Diff() {
+		body = append(body, "! "+line)
+	}
+	body = append(body, "", "the cage badge will read HIGH RISK while it applies")
+	st.Confirm = Confirm{
+		Kind:   ConfirmPolicy,
+		Title:  "High risk policy",
+		Body:   body,
+		Choice: 1,
+		Policy: PolicyHigh,
+	}
 }
 
 // confirmKey drives the confirmation modal. Enter or space activates the
@@ -310,16 +617,16 @@ func (st *UIState) confirmKey(k Key, snap *Snapshot) event {
 	if k.Type == KeyEsc || k.Type == KeyBackTab {
 		st.Confirm.Choice = 1
 		st.closeConfirm()
-		return event{kind: evStop}
+		return event{kind: evNone}
 	}
 	if k.Type == KeyLeft || k.Type == KeyRight || k.Type == KeyTab {
 		st.Confirm.Choice = 1 - st.Confirm.Choice
-		return event{kind: evStop}
+		return event{kind: evNone}
 	}
 	if k.Type == KeyEnter || (k.Type == KeyRune && k.Rune == ' ') {
 		return st.acceptConfirm(snap)
 	}
-	return event{kind: evStop}
+	return event{kind: evNone}
 }
 
 // acceptConfirm resolves the dialog into the event it was opened for. Only the
@@ -330,7 +637,7 @@ func (st *UIState) acceptConfirm(snap *Snapshot) event {
 	st.closeConfirm()
 	if !confirmed {
 		st.flash("cancelled - nothing changed", StateMeta, snap.Now)
-		return event{kind: evStop}
+		return event{kind: evNone}
 	}
 	switch c.Kind {
 	case ConfirmExit:
@@ -352,7 +659,7 @@ func (st *UIState) acceptConfirm(snap *Snapshot) event {
 	case ConfirmPolicy:
 		return event{kind: evSetPolicy, preset: c.Policy}
 	}
-	return event{kind: evStop}
+	return event{kind: evNone}
 }
 
 // closeConfirm clears the dialog, returning to the terminal view.
@@ -413,7 +720,7 @@ func (st *UIState) askExit(snap *Snapshot) event {
 		Body:   body,
 		Choice: 1,
 	}
-	return event{kind: evStop}
+	return event{kind: evNone}
 }
 
 // exportKey drives the export picker: space toggles a row, "a" selects all,
@@ -427,10 +734,10 @@ func (st *UIState) exportKey(k Key, snap *Snapshot) event {
 	case KeyEsc:
 		st.SetView(ViewTerminal, snap.Now)
 		st.Focus = focusInput
-		return event{kind: evStop}
+		return event{kind: evNone}
 	case KeyEnter:
 		st.askExport(snap)
-		return event{kind: evStop}
+		return event{kind: evNone}
 	case KeyUp:
 		if st.Export.Cursor > 0 {
 			st.Export.Cursor--
@@ -467,7 +774,7 @@ func (st *UIState) exportKey(k Key, snap *Snapshot) event {
 			}
 		}
 	}
-	return event{kind: evStop}
+	return event{kind: evNone}
 }
 
 func anyConfirmOpen(st *UIState) bool { return st != nil && st.Confirm.Kind != ConfirmNone }

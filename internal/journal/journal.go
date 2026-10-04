@@ -318,6 +318,25 @@ func (s *Store) Runs() ([]workspace.Run, error) {
 	return out, nil
 }
 
+// RunIDs lists the directory ids of the finished runs, in the same order Runs
+// returns them.
+//
+// The review view needs both: Runs gives the commands and change entries, while
+// the id is what the diff files are actually stored under. Returning them from
+// separate calls would let a caller pair a run with the wrong content, so both
+// come from the same ordering.
+func (s *Store) RunIDs() ([]string, error) {
+	stored, err := s.storedRuns()
+	if err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(stored))
+	for _, sr := range stored {
+		out = append(out, sr.ID)
+	}
+	return out, nil
+}
+
 // storedRun is a run record together with the id of the directory it lives in.
 type storedRun struct {
 	ID  string

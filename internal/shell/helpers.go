@@ -1,5 +1,3 @@
-//go:build linux
-
 package shell
 
 import (
@@ -78,14 +76,19 @@ func defaultBinds() []jailspec.Bind {
 	return binds
 }
 
-// killSandboxProcess terminates the sandbox helper (pid 1 of the sandbox pid
-// namespace) and waits for it so nothing is left behind.
-func killSandboxProcess(sb *sandbox) error {
-	if sb == nil || sb.cmd == nil || sb.cmd.Process == nil {
+// killSandboxProcess terminates a sandbox helper and waits for it, so nothing
+// is left behind.
+//
+// It takes the command rather than a handle type because the two callers - the
+// line session and the cage's runner - keep different handles for the same
+// process. Sharing this one function is what guarantees they tear a sandbox
+// down identically.
+func killSandboxProcess(cmd *exec.Cmd) error {
+	if cmd == nil || cmd.Process == nil {
 		return nil
 	}
-	_ = sb.cmd.Process.Kill()
-	_, werr := sb.cmd.Process.Wait()
+	_ = cmd.Process.Kill()
+	_, werr := cmd.Process.Wait()
 	return werr
 }
 

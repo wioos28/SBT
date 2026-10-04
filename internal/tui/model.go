@@ -60,12 +60,38 @@ func fields(s string) []string { return strings.Fields(s) }
 
 func osGetenv(k string) string { return os.Getenv(k) }
 
-var HelpLines = []string{
-	"SBT cage help",
-	"  alt+1..5 changes view",
-	"  ctrl+k command palette",
-	"  ctrl+d exit / confirm",
-	"  use the status bar for the current sandbox verdict",
+// HelpLines documents the cage's keys. It is built from the command registry so
+// a binding and the help the user reads cannot drift apart.
+var HelpLines = helpLines()
+
+// helpViews is every view the rail and the menu can reach.
+var helpViews = []View{ViewTerminal, ViewFiles, ViewChanges, ViewStatus, ViewExport, ViewHelp}
+
+func helpLines() []string {
+	lines := []string{
+		"SBT cage",
+		"  " + helpViewKeys() + "  switch view",
+		"  f10 / alt+m        open the menu bar",
+		"  ctrl+k             command palette",
+		"  enter              run the command in the input line",
+		"  enter (changes)    review the selected change",
+		"  ctrl+.             stop the running sandbox",
+		"  ctrl+d             leave (always asks first)",
+		"  esc                close the overlay, or go back",
+		"",
+		"Look  menu switches the white / dark theme; SBT_THEME=light",
+		"or SBT_THEME=dark picks one at startup.",
+		"",
+		"The status bar always states what the cage enforces, so the",
+		"session never depends on a colour or a menu to be understood.",
+	}
+	return lines
+}
+
+// helpViewKeys renders the view shortcuts as one range.
+func helpViewKeys() string {
+	first, last := helpViews[0].Shortcut(), helpViews[len(helpViews)-1].Shortcut()
+	return first + ".." + last[len("alt+"):]
 }
 
 // View is one screen inside the workspace area.
@@ -203,7 +229,16 @@ type Snapshot struct {
 	WorkspaceDir string
 	Files        []journal.FileInfo
 	Runs         []workspace.Run
-	Notes        []string
+	// RunIDs are the journal ids parallel to Runs. The UI needs them to ask
+	// for a diff: a run is addressed by the directory it lives in, not by its
+	// position in this list.
+	RunIDs []string
+	Notes  []string
+
+	// Diff is the before/after content of the change the changes view has
+	// selected. It is filled by the session from the journal, never computed
+	// by the renderer.
+	Diff DiffState
 
 	// Resources.
 	Stats monitor.Snapshot
@@ -214,6 +249,10 @@ type Snapshot struct {
 
 	// Now is the clock the UI renders; the session sets it so tests are stable.
 	Now time.Time
+
+	// Light records which ground the interface is drawn on, so the menu can
+	// show the current choice as a tick rather than making the user remember.
+	Light bool
 }
 
 // Counts sums the changes of every finished run.
@@ -262,6 +301,12 @@ const (
 	// the monitor, so the isolation report cannot go stale while the session
 	// is open.
 	ReqRefresh
+	// ReqDiff asks the session to load the before/after content of one path in
+	// one run. Reading content is the session's job for the same reason running
+	// a sandbox is: it is the only component that knows where runs are stored.
+	ReqDiff
+	// ReqOpenPolicy asks the session to change the policy of the next sandbox.
+	ReqOpenPolicy
 )
 
 // Request is one instruction from the UI to the session.
@@ -272,6 +317,11 @@ type Request struct {
 	Destination string
 	Overwrite   bool
 	Policy      policy.Preset
+	// RunID and Entry address one changed path: the run directory it was
+	// recorded in and the workspace-relative path inside it.
+	RunID  string
+	Entry  string
+	Choice PolicyChoice
 }
 
 // RunRequest builds a run request.

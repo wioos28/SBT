@@ -42,22 +42,53 @@ type Palette struct {
 	Warning  RGB
 }
 
-// DefaultPalette is the SBT palette.
+// DefaultPalette is the SBT palette: a white-forward dark scheme.
+//
+// White leads the interface - the primary text is pure white and the greys are
+// cool and low-contrast - so the interface reads as text on a ground rather
+// than as coloured blocks. The accent and the three severity colours are the
+// exception, and deliberately so: they answer "is this safe?", which is the one
+// question the interface exists to answer. Flattening those to white would make
+// PROTECTED and BROKEN look identical at a glance, so they keep their colour
+// and their word.
 var DefaultPalette = Palette{
-	Bg:       Hex(0x07090C),
-	BgTop:    Hex(0x0D1015),
-	BgBottom: Hex(0x0A0E13),
-	Surface:  Hex(0x0B0F14),
-	Surface2: Hex(0x10151B),
-	Yellow:   Hex(0xF5C518),
-	YellowHi: Hex(0xD9AD00),
-	Green:    Hex(0x22C55E),
-	Red:      Hex(0xE53935),
-	Text:     Hex(0xE5E7EB),
-	Fg:       Hex(0xE5E7EB),
-	Muted:    Hex(0x7C8796),
-	Border:   Hex(0x242A33),
-	Warning:  Hex(0xF59E0B),
+	Bg:       Hex(0x0A0C10),
+	BgTop:    Hex(0x12151C),
+	BgBottom: Hex(0x0D1015),
+	Surface:  Hex(0x111419),
+	Surface2: Hex(0x171B22),
+	Yellow:   Hex(0xF7D046),
+	YellowHi: Hex(0xE8BC2F),
+	Green:    Hex(0x34D399),
+	Red:      Hex(0xFF6B6B),
+	Text:     Hex(0xFFFFFF),
+	Fg:       Hex(0xFFFFFF),
+	Muted:    Hex(0x8B95A7),
+	Border:   Hex(0x2B323D),
+	Warning:  Hex(0xFBBF24),
+}
+
+// LightPalette is the same interface on a white ground.
+//
+// It is not an inversion of the dark palette. Every colour is chosen against a
+// light background for contrast, because mechanically flipping a dark scheme
+// produces pastels that are unreadable in daylight - which is exactly the
+// situation a light theme is for.
+var LightPalette = Palette{
+	Bg:       Hex(0xFFFFFF),
+	BgTop:    Hex(0xF7F9FC),
+	BgBottom: Hex(0xF1F4F9),
+	Surface:  Hex(0xFBFCFE),
+	Surface2: Hex(0xF4F7FB),
+	Yellow:   Hex(0xB45309),
+	YellowHi: Hex(0x92400E),
+	Green:    Hex(0x047857),
+	Red:      Hex(0xDC2626),
+	Text:     Hex(0x0B1220),
+	Fg:       Hex(0x0B1220),
+	Muted:    Hex(0x5B6678),
+	Border:   Hex(0xC8D2E0),
+	Warning:  Hex(0xC2410C),
 }
 
 // ColorDepth is how much colour the terminal can take.
@@ -130,6 +161,9 @@ type Theme struct {
 	Depth   ColorDepth
 	ASCII   bool
 	Motion  bool
+	// Light records which ground is in use, so the menu can show the current
+	// choice and the status bar can name it.
+	Light bool
 }
 
 // NewTheme builds the theme for a terminal.
@@ -140,6 +174,82 @@ func NewTheme(p Palette) *Theme {
 		ASCII:   !SupportsUnicode(),
 		Motion:  MotionAllowed(),
 	}
+}
+
+// NewThemeAuto builds the theme the environment asks for.
+//
+// SBT_THEME=light or dark chooses explicitly; otherwise a terminal that reports
+// a light background is honoured, so SBT does not open as a white-on-white
+// screen on someone who never asked for it. Everything else gets the dark
+// palette, because the severity colours in it were chosen for a dark ground.
+func NewThemeAuto() *Theme {
+	t := NewTheme(paletteForEnv())
+	t.Light = t.Palette == LightPalette
+	return t
+}
+
+// paletteForEnv resolves the palette from the environment.
+func paletteForEnv() Palette {
+	switch strings.ToLower(strings.TrimSpace(os.Getenv("SBT_THEME"))) {
+	case "light", "white", "day":
+		return LightPalette
+	case "dark", "night":
+		return DefaultPalette
+	}
+	if terminalIsLight() {
+		return LightPalette
+	}
+	return DefaultPalette
+}
+
+// terminalIsLight makes a best-effort guess at whether the terminal paints a
+// light background.
+//
+// It reads COLORFGBG rather than querying the terminal: an OSC 11 query needs a
+// reply from a program that may not answer, and a session that blocks waiting
+// for one is worse than one that guesses from a variable the user already set.
+func terminalIsLight() bool {
+	raw := os.Getenv("COLORFGBG")
+	if raw == "" {
+		return false
+	}
+	fields := strings.Split(raw, ";")
+	if len(fields) < 2 {
+		return false
+	}
+	// COLORFGBG is "<fg>;<bg>". A background of 7 or 15 is the light default.
+	switch strings.TrimSpace(fields[1]) {
+	case "7", "15":
+		return true
+	}
+	return false
+}
+
+// SetLight switches the theme between the white and the dark ground.
+//
+// It is a swap rather than a re-detection: the user just asked for a change, so
+// their choice outranks whatever the environment says.
+func (t *Theme) SetLight(light bool) {
+	if light {
+		t.Palette = LightPalette
+	} else {
+		t.Palette = DefaultPalette
+	}
+	t.Light = light
+}
+
+// ToggleLight flips the theme and reports which ground is now in use.
+func (t *Theme) ToggleLight() bool {
+	t.SetLight(!t.Light)
+	return t.Light
+}
+
+// Ground names the current theme for the interface and the help text.
+func (t *Theme) Ground() string {
+	if t != nil && t.Light {
+		return "LIGHT"
+	}
+	return "DARK"
 }
 
 // MotionAllowed reports whether short animations may play. SBT honours

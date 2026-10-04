@@ -1,15 +1,17 @@
-//go:build linux
-
-// Package shell implements the interactive SBT terminal session: the startup
-// banner with the verified capability report, the REPL, and the commands that
-// start, inspect and stop a sandbox.
+// Package shell implements the interactive SBT session: the startup banner
+// with the verified capability report, the REPL, the full-screen cage, and the
+// runner that starts sandboxes.
+//
+// Most of this package is platform neutral. The one step that is not - actually
+// starting the isolation - lives behind startHelper in backend_linux.go and
+// backend_other.go. That split is what lets the interface run on a machine SBT
+// cannot isolate: the cage, the review view and the reports all work, and the
+// runner says plainly that it will not start a command.
 package shell
 
 import (
-	"bufio"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -17,8 +19,6 @@ import (
 	"time"
 
 	"github.com/wioos28/sbt/internal/platform"
-	"github.com/wioos28/sbt/internal/platform/linux/ns"
-	"github.com/wioos28/sbt/internal/shared/helpermode"
 	"github.com/wioos28/sbt/internal/shared/jailspec"
 )
 
@@ -177,53 +177,26 @@ func (s *Session) start(argv []string) error {
 		sp.stop("failed")
 		return err
 	}
-	controlR, controlW, err := os.Pipe()
+	// The platform-specific step. Everything above and below this call is
+	// shared; only the isolation itself differs per operating system.
+	cmd, err := startHelper(spec, specPath, s.in, s.out)
 	if err != nil {
 		_ = os.RemoveAll(filepath.Dir(specPath))
 		sp.stop("failed")
-		return fmt.Errorf("cannot create the sandbox control pipe: %w", err)
-	}
-	started, err := ns.SpawnMapped(ns.Options{
-		Mode:     helpermode.ModeJail,
-		SpecPath: specPath,
-		Control:  controlW,
-		Stdin:    s.in,
-		Stdout:   s.out,
-		Stderr:   os.Stderr,
-	})
-	_ = controlW.Close()
-	if err != nil {
-		_ = controlR.Close()
-		_ = os.RemoveAll(filepath.Dir(specPath))
-		sp.stop("failed")
-		return fmt.Errorf("cannot start the sandbox helper: %w", err)
-	}
-	result, rerr := readControlResult(controlR)
-	_ = controlR.Close()
-	if rerr != nil {
-		_ = started.Cmd.Process.Kill()
-		_, _ = started.Cmd.Process.Wait()
-		_ = os.RemoveAll(filepath.Dir(specPath))
-		sp.stop("failed")
-		return fmt.Errorf("sandbox did not report startup: %w", rerr)
+		s.sbxState = "UNAVAILABLE"
+		s.reason = err.Error()
+		return err
 	}
 	sp.stop("ready")
-	if !result.OK {
-		_, _ = started.Cmd.Process.Wait()
-		_ = os.RemoveAll(filepath.Dir(specPath))
-		s.sbxState = "FAILED"
-		s.reason = result.Reason
-		return fmt.Errorf("%s", result.Reason)
-	}
 	sb := &sandbox{
 		id:       spec.SandboxID,
 		dir:      filepath.Dir(specPath),
 		specPath: specPath,
-		cmd:      started.Cmd,
+		cmd:      cmd,
 	}
 	s.sbx = sb
 	s.sbxState = "RUNNING"
-	s.reason = result.Reason
+	s.reason = "sandbox ready"
 	// Reap the helper in the background: when it exits the command finished
 	// (or the sandbox was stopped) and the session state must move on.
 	go func() {
@@ -240,23 +213,8 @@ func (s *Session) start(argv []string) error {
 	return nil
 }
 
-// readControlResult reads one newline terminated JSON report from the control
-// pipe, bounded by controlReadTimeout.
-func readControlResult(r *os.File) (jailspec.Result, error) {
-	var res jailspec.Result
-	_ = r.SetReadDeadline(time.Now().Add(controlReadTimeout))
-	line, err := bufio.NewReader(r).ReadString('\n')
-	if err != nil {
-		return res, err
-	}
-	if err := json.Unmarshal([]byte(line), &res); err != nil {
-		return res, fmt.Errorf("invalid sandbox report: %w", err)
-	}
-	return res, nil
-}
-
-// stop kills the sandbox. The helper is pid 1 of its pid namespace, so killing
-// it tears the whole namespace down with it.
+// stop kills the sandbox. The helper is pid 1 of its pid namespace wherever the
+// platform provides one, so killing it tears the whole namespace down.
 func (s *Session) stop() {
 	if s.sbx == nil {
 		return
@@ -265,7 +223,7 @@ func (s *Session) stop() {
 	s.sbx = nil
 	s.sbxState = "STOPPED"
 	s.reason = "sandbox stopped by user"
-	_ = killSandboxProcess(sb)
+	_ = killSandboxProcess(sb.cmd)
 	_ = os.RemoveAll(sb.dir)
 }
 

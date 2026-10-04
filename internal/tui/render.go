@@ -30,18 +30,31 @@ type layout struct {
 	Side    Rect // security/resources panel, right (absent on narrow terminals)
 	HasRail bool
 	HasSide bool
+	// HasMenu is false when the terminal is too short to carry a menu bar. The
+	// menu is then reachable only through the command palette, which costs no
+	// vertical space.
+	HasMenu bool
 }
 
 const railWidth = 18
 
 // computeLayout applies the minimum sizes the cage needs. Below them the UI
 // degrades to a plain message instead of drawing clipped garbage.
+//
+// The menu bar takes a row off the top of the body. It is only reserved when
+// the terminal can spare one: a three-row-tall terminal showing an empty menu
+// strip and no content is strictly worse than showing the content.
 func computeLayout(w, h int) layout {
 	var l layout
 	if h < 8 || w < 24 {
 		return l
 	}
-	l.Body = Rect{X: 0, Y: 1, W: w, H: h - 2}
+	top := 1
+	if h >= 12 {
+		l.HasMenu = true
+		top = 2
+	}
+	l.Body = Rect{X: 0, Y: top, W: w, H: h - top - 1}
 	col := 0
 	if w >= 62 {
 		l.HasRail = true
@@ -71,6 +84,9 @@ func (i *Interpreter) Render(s *Snapshot, st *UIState) *Buffer {
 	}
 	now := s.Now
 	i.topBar(b, s, st, w)
+	if l.HasMenu {
+		i.menuBar(b, s, st, w)
+	}
 	i.rail(b, s, st, l)
 	if l.HasSide {
 		i.securityPanel(b, s, st, l.Side)
@@ -87,6 +103,12 @@ func (i *Interpreter) Render(s *Snapshot, st *UIState) *Buffer {
 	// Notices draw last so a warning sits above the content it reports on and
 	// is never hidden behind a panel.
 	i.toasts(b, s, st)
+	// The dropdown is drawn above the workspace but below the modal overlays: a
+	// menu is a shortcut, and a confirmation about something the menu started
+	// must not be half-covered by it.
+	if st.Menu.Open && l.HasMenu {
+		i.menuDropdown(b, s, st, w)
+	}
 	if st.Palette.Open {
 		i.drawPalette(b, s, st)
 	}
@@ -95,6 +117,171 @@ func (i *Interpreter) Render(s *Snapshot, st *UIState) *Buffer {
 	}
 	i.clock(b, st, now)
 	return b
+}
+
+// menuBar draws the row of menu titles under the top bar.
+//
+// The bar is always visible even when nothing is open, because a menu the user
+// cannot see is a menu they will not look for. The active title is marked with
+// the caret and an underline as well as the accent colour, so the open menu is
+// identifiable in a monochrome terminal.
+func (i *Interpreter) menuBar(b *Buffer, s *Snapshot, st *UIState, w int) {
+	t := i.Theme
+	p := t.Palette
+	y := 1
+	b.Fill(0, y, w, 1, ' ', Style{Fg: p.Muted, Bg: p.BgTop, HasBg: true})
+	col := 1
+	for idx, m := range st.Menus.Menus {
+		label := " " + m.Title
+		if col+StringWidth(label) >= w-2 {
+			// The remaining menus do not fit. Saying so beats silently
+			// dropping half the bar with no indication that it exists.
+			b.WriteRight(w-1, y, " +"+"more ", Style{Fg: p.Muted, Bg: p.BgTop, HasBg: true})
+			return
+		}
+		active := st.Menu.Open && st.Menu.Bar == idx
+		style := Style{Fg: p.Muted, Bg: p.BgTop, HasBg: true}
+		if active {
+			style = Style{Fg: p.Bg, Bg: p.Yellow, HasBg: true, Bold: true}
+		}
+		col = b.Write(col, y, label, style)
+		col++
+	}
+	// The one key that reaches the whole bar, restated where the user is
+	// already looking rather than only in the help view.
+	hint := "f10 menu"
+	if !st.Menu.Open {
+		b.WriteRight(w-1, y, hint, Style{Fg: p.Muted, Bg: p.BgTop, HasBg: true})
+	}
+}
+
+// menuDropdown draws the open menu under its title.
+//
+// The dropdown never covers the status bar or the top bar: it is anchored to
+// the title it belongs to and clamped to the panel body, so the cage verdict
+// stays readable while a menu is open. That matters because the verdict is the
+// one piece of state that must never be hidden by a navigation affordance.
+func (i *Interpreter) menuDropdown(b *Buffer, s *Snapshot, st *UIState, w int) {
+	t := i.Theme
+	p := t.Palette
+	st.Menu.Clamp(st.Menus)
+	if st.Menu.Bar < 0 || st.Menu.Bar >= len(st.Menus.Menus) {
+		return
+	}
+	menu := st.Menus.Menus[st.Menu.Bar]
+	if len(menu.Items) == 0 {
+		return
+	}
+
+	// Find the title's column so the dropdown opens under it.
+	col := 1
+	for idx, m := range st.Menus.Menus {
+		if idx == st.Menu.Bar {
+			break
+		}
+		col += StringWidth(" "+m.Title) + 1
+	}
+
+	width := menuWidth(menu)
+	if col+width > w-1 {
+		// Shift left rather than shrink: a menu whose labels are truncated is
+		// a menu that hides its own dangerous rows.
+		col = max(w-1-width, 0)
+	}
+	if col < 0 {
+		col = 0
+	}
+	height := len(menu.Items) + 2
+	top := 2
+	if top+height > st.Height-1 {
+		height = st.Height - 1 - top
+	}
+	if height < 3 {
+		return
+	}
+
+	// The bar row under the title is cleared so the dropdown has a solid
+	// background where it overlaps the menu strip.
+	b.Fill(col, 1, width, 1, ' ', Style{Fg: p.Muted, Bg: p.BgTop, HasBg: true})
+	inner := t.Panel(b, col, top, width, height, "", "", p.Yellow, true)
+	if inner.Empty() {
+		return
+	}
+
+	rows := inner.H
+	start := 0
+	if len(menu.Items) > rows {
+		start = st.Menu.Cursor - rows/2
+		if start < 0 {
+			start = 0
+		}
+		if start > len(menu.Items)-rows {
+			start = len(menu.Items) - rows
+		}
+	}
+	for j := 0; j < rows && start+j < len(menu.Items); j++ {
+		item := menu.Items[start+j]
+		selected := start+j == st.Menu.Cursor
+		style := Style{Fg: p.Text}
+		if item.Dangerous {
+			style.Fg = p.Red
+		}
+		if selected {
+			style = Style{Fg: p.Bg, Bg: p.Yellow, HasBg: true, Bold: true}
+			// The highlight eases in rather than snapping, so opening a menu
+			// reads as movement instead of a jump cut.
+			if st.Motion {
+				style.Bg = Mix(p.Yellow, p.Surface2, 1-Breath(s.Now, st.Menu.OpenedAt, PulsePeriod)*0.5)
+			}
+		}
+		// A toggle shows its state as a word and a mark, so the row is
+		// unambiguous without colour.
+		mark := "  "
+		if item.Checked != nil {
+			mark = "[ ] "
+			if item.Checked(s) {
+				mark = "[x] "
+			}
+		}
+		label := mark + item.Title
+		if item.Dangerous && !selected {
+			label = "! " + mark + item.Title
+		}
+		hintW := StringWidth(item.Hint)
+		limit := inner.Right()
+		if hintW > 0 {
+			limit = inner.Right() - hintW - 1
+		}
+		b.WriteClipped(inner.X, inner.Y+j, limit, Truncate(label, limit-inner.X), style)
+		if item.Hint != "" {
+			b.WriteRight(inner.Right(), inner.Y+j, item.Hint, style)
+		}
+	}
+}
+
+// menuWidth is the dropdown's width: wide enough for the longest row including
+// its hint and the danger marker.
+func menuWidth(m Menu) int {
+	longest := 0
+	for _, item := range m.Items {
+		w := StringWidth(item.Title) + StringWidth(item.Hint) + 8
+		if item.Checked != nil {
+			w += 4
+		}
+		if item.Dangerous {
+			w += 2
+		}
+		if w > longest {
+			longest = w
+		}
+	}
+	if longest < 24 {
+		longest = 24
+	}
+	if longest > 52 {
+		longest = 52
+	}
+	return longest + 2
 }
 
 // toasts draws the notice stack in the bottom right of the cage.
@@ -253,6 +440,33 @@ func (i *Interpreter) topBar(b *Buffer, s *Snapshot, st *UIState, w int) {
 		badgeCol = Glow(badgeCol, breath*0.18)
 	}
 	b.WriteRight(w, 0, badge+" ", Style{Fg: badgeCol, Bg: p.BgTop, HasBg: true, Bold: true})
+	// The theme name sits immediately left of the verdict, separated by a
+	// divider. Both are right-aligned, so the eye finds the pair together and
+	// the verdict stays the last thing read.
+	i.groundChip(b, s, w-StringWidth(badge)-2, 0)
+}
+
+// groundChip names the current theme in the top bar.
+//
+// It is a small thing, but an interface whose whole palette can change at
+// keystroke should always say which one is in use - otherwise a user who
+// toggles it and does not like the result has no way to tell what they are
+// looking at.
+func (i *Interpreter) groundChip(b *Buffer, s *Snapshot, x, y int) {
+	th := i.Theme
+	if th == nil {
+		return
+	}
+	name := th.Ground()
+	style := Style{Fg: th.Palette.Muted, Bg: th.Palette.BgTop, HasBg: true}
+	if th.Light {
+		style.Fg = th.Palette.Yellow
+	}
+	// A hairline divider keeps the theme name from reading as part of the
+	// verdict, which would be a genuinely confusing mistake on a safety bar.
+	divider := Style{Fg: th.Palette.Border, Bg: th.Palette.BgTop, HasBg: true}
+	b.Set(x-1, y, k(th.Glyphs().Pipe), divider)
+	b.WriteRight(x, y, name, style)
 }
 
 // cageBadge is the right hand status of the top bar. It is the one place the
@@ -379,11 +593,13 @@ func (i *Interpreter) statusBar(b *Buffer, s *Snapshot, st *UIState, w, h int) {
 		return b.Write(x, y, text, sty)
 	}
 	col := 1
-	col = wrap(col, "ctrl+k commands", Style{Fg: p.Muted})
-	col = wrap(col, "  alt+1..5 views", Style{Fg: p.Muted})
+	col = wrap(col, "f10 menu", Style{Fg: p.YellowHi})
+	col = wrap(col, "  ctrl+k commands", Style{Fg: p.Muted})
+	col = wrap(col, "  alt+1..6 views", Style{Fg: p.Muted})
 	if !anyConfirmOpen(st) {
 		col = wrap(col, "  ctrl+d exit", Style{Fg: p.Muted})
 	}
+	_ = col
 	// Right side: the state line. Newest note wins; otherwise the sandbox
 	// verdict.
 	right, rcol := i.statusRight(s, st)
@@ -636,7 +852,14 @@ func (i *Interpreter) filesView(b *Buffer, s *Snapshot, st *UIState, r Rect) {
 	}
 }
 
-// changesView lists every change across runs, newest run last.
+// changesView is the review screen: every change of every run on the left, and
+// the before/after content of the selected one on the right.
+//
+// The two panes sit side by side rather than one replacing the other, because
+// the review act is comparison - "what changed" and "how it changed" - and
+// making the user remember a path to flip between them is how reviews get
+// skipped. On a narrow terminal the diff takes the whole panel and Escape brings
+// the list back.
 func (i *Interpreter) changesView(b *Buffer, s *Snapshot, st *UIState, r Rect) {
 	t := i.Theme
 	p := t.Palette
@@ -647,50 +870,184 @@ func (i *Interpreter) changesView(b *Buffer, s *Snapshot, st *UIState, r Rect) {
 	if inner.Empty() {
 		return
 	}
-	if len(s.Runs) == 0 {
+	rows := BuildChangeRows(s)
+	if len(rows) == 0 {
 		i.emptyState(b, inner, "no changes recorded", "the cage records what each run touches")
 		return
 	}
-	type row struct {
-		text  string
-		state StateKind
-	}
-	var rows []row
-	for i, run := range s.Runs {
-		rows = append(rows, row{"run " + itoa(i+1) + "  " + strings.Join(run.Command, " "), StateMeta})
-		rc := run.Counts()
-		if rc.Summary() == "" {
-			rows = append(rows, row{"   clean - nothing changed", StateMeta})
+	// The diff pane needs real room to be readable. Below the threshold it takes
+	// the whole panel rather than a useless sliver.
+	wide := inner.W >= 76 && st.DiffOpen
+	var listRect, diffRect Rect
+	if wide {
+		listW := inner.W / 3
+		if listW < 24 {
+			listW = 24
 		}
-		for _, f := range run.Entries {
-			state := StateOK
-			switch f.Kind {
-			case workspace.Modified:
-				state = StateWarn
-			case workspace.Deleted:
-				state = StateDanger
+		listRect = Rect{X: inner.X, Y: inner.Y, W: listW - 1, H: inner.H}
+		diffRect = Rect{X: listRect.Right(), Y: inner.Y, W: inner.W - listW + 1, H: inner.H}
+	} else if st.DiffOpen {
+		diffRect = inner
+	} else {
+		listRect = inner
+	}
+	if listRect.W > 0 {
+		i.changeList(b, s, st, rows, listRect)
+	}
+	if diffRect.W > 0 {
+		i.diffPane(b, s, st, diffRect)
+	}
+}
+
+// changeList draws the flat list of changes with its cursor.
+func (i *Interpreter) changeList(b *Buffer, s *Snapshot, st *UIState, rows []ChangeRow, r Rect) {
+	t := i.Theme
+	p := t.Palette
+	pick := Selectable(rows)
+	// The cursor is expressed in selectable-row space; converting it here is
+	// what keeps a run header from ever stealing it.
+	cursor := st.Changes.Row
+	if cursor >= len(pick) {
+		cursor = max(len(pick)-1, 0)
+	}
+	if cursor < 0 {
+		cursor = 0
+	}
+	st.Changes.Row = cursor
+
+	start := st.Changes.clampScroll(len(rows), r.H)
+	selectedRow := -1
+	if cursor < len(pick) {
+		selectedRow = pick[cursor]
+	}
+	for j := 0; j < r.H && start+j < len(rows); j++ {
+		row := rows[start+j]
+		y := r.Y + j
+		if row.Header {
+			label := "run " + itoa(row.RunIndex+1)
+			if row.RunIndex < len(s.Runs) {
+				label += "  " + strings.Join(s.Runs[row.RunIndex].Command, " ")
 			}
-			rows = append(rows, row{"  " + f.Kind.Symbol() + " " + f.Path, state})
+			b.WriteClipped(r.X, y, r.Right(), Truncate(label, r.W), Style{Fg: p.Muted, Bold: true})
+			continue
 		}
-		if rc.Warnings > 0 {
-			rows = append(rows, row{"  !" + itoa(rc.Warnings) + " notes on this run", StateWarn})
+		style := Style{Fg: p.Text}
+		switch row.Entry.Kind {
+		case workspace.Modified:
+			style.Fg = p.Yellow
+		case workspace.Deleted:
+			style.Fg = p.Red
 		}
+		text := row.Entry.Kind.Symbol() + " " + row.Entry.Path
+		if row.Entry.Risk() != "" {
+			// A path that needs a second look says so in the list, not only in
+			// the export dialog much later.
+			text = row.Entry.Kind.Symbol() + " ! " + row.Entry.Path
+		}
+		if start+j == selectedRow {
+			// Selection is a background and a bold weight, not only a colour,
+			// so it survives NO_COLOR.
+			style = Style{Fg: p.Bg, Bg: p.Yellow, HasBg: true, Bold: true}
+		}
+		b.WriteClipped(r.X, y, r.Right(), Truncate(text, r.W), style)
 	}
-	start := st.clampScroll(len(rows), inner.H)
-	for j := 0; j < inner.H && start+j < len(rows); j++ {
-		rw := rows[start+j]
-		sty := Style{Fg: p.Text}
-		switch rw.state {
-		case StateOK:
-			sty.Fg = p.Green
-		case StateWarn:
-			sty.Fg = p.Yellow
-		case StateDanger:
-			sty.Fg = p.Red
-		case StateMeta:
-			sty.Fg = p.Muted
+}
+
+// diffPane draws the before/after content of the selected change.
+func (i *Interpreter) diffPane(b *Buffer, s *Snapshot, st *UIState, r Rect) {
+	t := i.Theme
+	p := t.Palette
+	// Find what the cursor points at, so the pane can tell whether the loaded
+	// diff still belongs to what is highlighted.
+	var wantRun, wantPath string
+	rows := BuildChangeRows(s)
+	pick := Selectable(rows)
+	if st.Changes.Row >= 0 && st.Changes.Row < len(pick) {
+		row := rows[pick[st.Changes.Row]]
+		wantRun, wantPath = row.RunID, row.Entry.Path
+	}
+
+	header := "diff"
+	right := "enter review"
+	if wantPath != "" {
+		right = itoa(len(s.Diff.Lines)) + " lines"
+	}
+	inner := t.Panel(b, r.X, r.Y, r.W, r.H, header, right, p.Border, st.DiffOpen)
+	if inner.Empty() {
+		return
+	}
+	if wantPath == "" {
+		i.emptyState(b, inner, "nothing selected", "move the cursor over a change")
+		return
+	}
+	// The pane names what it is showing even before anything is loaded, so the
+	// header is never just the word "diff".
+	b.WriteClipped(inner.X, inner.Y, inner.Right(), Truncate(wantPath, inner.W),
+		Style{Fg: p.Text, Bold: true})
+	y := inner.Y + 1
+	b.WriteClipped(inner.X, y, inner.Right(),
+		strings.Repeat(t.Glyphs().H, max(inner.W, 0)), Style{Fg: p.Border})
+	y++
+
+	body := Rect{X: inner.X, Y: y, W: inner.W, H: inner.Bottom() - y}
+	switch {
+	case !s.Diff.Loaded:
+		i.emptyState(b, body, "nothing loaded yet", "press enter on a change to review it")
+		return
+	case s.Diff.Binary:
+		// Reviewing binary content as text is noise; "binary" is the honest
+		// answer and the reason is still worth showing.
+		msg := "binary content is not shown as text"
+		if s.Diff.Note != "" {
+			msg += "  (" + s.Diff.Note + ")"
 		}
-		b.WriteClipped(inner.X, inner.Y+j, inner.Right(), rw.text, sty)
+		i.emptyState(b, body, "binary file", msg)
+		return
+	case !s.Diff.Matches(wantRun, wantPath):
+		// The cursor moved before the load arrived, or the load failed. Either
+		// way the pane must not show a diff belonging to another path.
+		note := "this change could not be read"
+		if s.Diff.Note != "" {
+			note = s.Diff.Note
+		}
+		i.emptyState(b, body, "not available", note)
+		return
+	}
+
+	if s.Diff.Note != "" {
+		b.WriteClipped(inner.X, y, inner.Right(), Truncate("! "+s.Diff.Note, inner.W),
+			Style{Fg: p.Warning})
+		y++
+	}
+	rowsLeft := inner.Bottom() - y
+	if rowsLeft <= 0 {
+		return
+	}
+	// The viewport stays inside the content, and short content is shown from
+	// the top rather than floating in the middle of the pane.
+	offset := max(st.DiffScroll, 0)
+	if maxOffset := max(len(s.Diff.Lines)-rowsLeft, 0); offset > maxOffset {
+		offset = maxOffset
+	}
+	for j := 0; j < rowsLeft && offset+j < len(s.Diff.Lines); j++ {
+		line := s.Diff.Lines[offset+j]
+		style := Style{Fg: p.Text}
+		switch {
+		case strings.HasPrefix(line, "+"):
+			style.Fg = p.Green
+		case strings.HasPrefix(line, "-"):
+			style.Fg = p.Red
+		case strings.HasPrefix(line, "!"):
+			style.Fg = p.Warning
+		case strings.HasPrefix(line, "  "):
+			style.Fg = p.Muted
+		}
+		b.WriteClipped(inner.X, y+j, inner.Right(), line, style)
+	}
+	if hidden := len(s.Diff.Lines) - offset - rowsLeft; hidden > 0 {
+		// Saying how much is below the fold keeps a long diff from looking
+		// complete when it is not.
+		b.WriteRight(inner.Right(), inner.Bottom()-1, itoa(hidden)+" more", Style{Fg: p.Muted})
 	}
 }
 

@@ -137,9 +137,17 @@ func (s *Screen) writeRow(y int) {
 	}
 }
 
-// theme is set by the App so the screen can emit style sequences. A nil theme
-// renders plain text.
+// SetTheme attaches the theme used to emit style sequences. A nil theme renders
+// plain text.
 func (s *Screen) SetTheme(t *Theme) { s.theme = t }
+
+// Invalidate drops the previous frame, so the next Present redraws every cell.
+//
+// It exists for changes that cannot be expressed as a cell difference - a theme
+// swap, above all. Without it the screen would diff against cells drawn in the
+// old palette and leave the stale colours on screen wherever the characters
+// happened to be unchanged.
+func (s *Screen) Invalidate() { s.prev = nil }
 
 // Suspend hands the terminal back for a child process: the alternate screen is
 // left, the cursor restored and the terminal returned to cooked mode. SBT never

@@ -148,6 +148,43 @@ func (v ViewTransition) Progress(now time.Time) float64 {
 // Fade is the eased opacity of the incoming view.
 func (v ViewTransition) Fade(now time.Time) float64 { return EaseOutCubic(v.Progress(now)) }
 
+// DiffState is the before/after content of one changed path, as the session
+// loaded it from the journal.
+//
+// The renderer never diffs anything itself: it draws these lines. That keeps
+// the "SBT shows what it measured, not what it assumed" rule intact - the diff
+// is produced from the content the helper actually captured, and when it could
+// not be produced the reason is in Note rather than a silently empty review.
+type DiffState struct {
+	// RunID and Path identify what is shown, so the view can tell whether the
+	// loaded diff still matches the cursor.
+	RunID string
+	Path  string
+	// Kind is the change the run recorded for this path.
+	Kind string
+	// Lines are the rendered diff rows, already prefixed.
+	Lines []string
+	// Added and Removed are the line counts, shown in the header.
+	Added   int
+	Removed int
+	// Binary is set when the content cannot be reviewed as text.
+	Binary bool
+	// Truncated is set when the file was larger than the review budget.
+	Truncated bool
+	// Note carries any reason the diff is incomplete.
+	Note string
+	// Loaded reports whether a diff was read at all. It is false before
+	// anything is selected and when the load failed, which is what lets the
+	// view show the failure instead of an empty review.
+	Loaded bool
+}
+
+// Matches reports whether this loaded diff is the one a cursor points at. The
+// changes view uses it to avoid showing run 1's diff next to run 2's entry.
+func (d DiffState) Matches(runID, path string) bool {
+	return d.Loaded && d.RunID == runID && d.Path == path
+}
+
 // Busy is the indeterminate progress indicator shown while the session is doing
 // something the UI cannot yet report. It is deliberately label-first: the user
 // is told what is happening before they are told it is happening fast.

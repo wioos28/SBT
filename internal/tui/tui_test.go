@@ -96,8 +96,8 @@ func TestPaletteEnterOpensConfirmation(t *testing.T) {
 		t.Fatal("discard must be findable in the palette")
 	}
 	ev := st.handleKey(Key{Type: KeyEnter}, &snap)
-	if ev.kind != evStop {
-		t.Fatalf("discard must ask first, not act directly; got %v", ev.kind)
+	if ev.kind == evDiscard {
+		t.Fatal("discard must ask first, not act directly")
 	}
 	if st.Confirm.Kind != ConfirmDiscard {
 		t.Fatalf("expected a discard confirmation, got %v", st.Confirm.Kind)

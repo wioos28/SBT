@@ -1,6 +1,6 @@
 // Package internalhelper implements the hidden helper modes that SBT re-executes
-// with. The helper modes are documented in docs/SECURITY.md but are not part of
-// the public CLI surface.
+// with. The helper modes are documented in docs/SECURITY.md and
+// docs/LIMITATIONS.md but are not part of the public CLI surface.
 package internalhelper
 
 import (
