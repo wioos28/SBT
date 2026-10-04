@@ -89,6 +89,7 @@ var settingSections = []settingSection{
 		{Key: "troll.enabled", Label: tr("settings.row.trollOn", "Fun messages"), Kind: settingToggle},
 		{Key: "troll.frequency", Label: tr("settings.row.trollFreq", "Frequency (0-100)"), Kind: settingNumber},
 		{Key: "troll.intensity", Label: tr("settings.row.trollIntensity", "Intensity (0-100)"), Kind: settingNumber},
+		{Key: "ui.pet", Label: tr("settings.row.pet", "Companion"), Kind: settingChoice},
 	}},
 	{Title: tr("settings.section.advanced", "Advanced"), Rows: []settingRow{
 		{Key: "notifications.enabled", Label: tr("settings.row.notifyOn", "Notifications"), Kind: settingToggle},

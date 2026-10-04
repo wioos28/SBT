@@ -85,6 +85,7 @@ var Schema = []Definition{
 	{Key: "troll.enabled", Category: CatTroll, Kind: KindBool, Default: false, Help: "harmless cosmetic jokes (never touches security UI)"},
 	{Key: "troll.frequency", Category: CatTroll, Kind: KindInt, Default: 15, Help: "how often a troll message appears, 0-100"},
 	{Key: "troll.intensity", Category: CatTroll, Kind: KindInt, Default: 30, Help: "troll message boldness, 0-100"},
+	{Key: "ui.pet", Category: CatTroll, Kind: KindString, Default: "cat", Help: "companion in the right column: cat, dog, bird or off"},
 
 	{Key: "language.locale", Category: CatLanguage, Kind: KindString, Default: "en-US", Help: "active interface language"},
 
@@ -208,6 +209,8 @@ func ChoiceValues(key string) []string {
 		return []string{"auto", "slow", "normal", "fast"}
 	case "general.default_network":
 		return []string{"off", "on"}
+	case "ui.pet":
+		return []string{"cat", "dog", "bird", "off"}
 	case "notifications.minimum_level":
 		return []string{"info", "notice", "warning", "danger", "critical"}
 	case "language.locale":

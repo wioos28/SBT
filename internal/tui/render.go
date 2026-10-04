@@ -745,7 +745,90 @@ func (i *Interpreter) resourcesPanel(b *Buffer, s *Snapshot, ui *UIState, r Rect
 		pr := ui.Meters.Procs.Value(now, ui.Motion)
 		t.Meter(b, inner.X, y, inner.W, "procs", pr, float64(stat.ProcsLimit),
 			meterColor(pr/float64(stat.ProcsLimit), p), itoa(stat.Procs)+" procs")
+		y++
 	}
+	// The companion gets whatever rows are left. It is placed last and sized
+	// last so it never squeezes a gauge: the numbers matter more than the cat.
+	petH := inner.Bottom() - y
+	if petH >= 4 {
+		i.petPanel(b, ui.Pet, Rect{X: inner.X, Y: y, W: inner.W, H: petH})
+	}
+}
+
+// petPanel draws the companion and reports where it is, so the click handler can
+// pet it.
+//
+// The panel is cosmetic and is drawn from muted colours only. It never uses a
+// severity colour, because a green cat sitting next to a gauge would be read as
+// a verdict about the cage.
+func (i *Interpreter) petPanel(b *Buffer, pet Pet, r Rect) {
+	if !pet.Alive() {
+		return
+	}
+	t := i.Theme
+	p := t.Palette
+	if r.H < 3 {
+		return
+	}
+	right := ""
+	if pet.Mood != "" {
+		right = pet.Mood
+	} else {
+		right = pet.Kind.Name()
+	}
+	inner := t.Panel(b, r.X, r.Y, r.W, r.H, "companion", right, p.Border, false)
+	if inner.Empty() {
+		return
+	}
+	art := pet.art()
+	for j, line := range art {
+		if j >= inner.H {
+			break
+		}
+		b.WriteClipped(inner.X, inner.Y+j, inner.Right(), Truncate(line, inner.W),
+			Style{Fg: p.Yellow})
+	}
+	if inner.H > len(art) {
+		b.WriteClipped(inner.X, inner.Y+len(art), inner.Right(), "click to pet",
+			Style{Fg: p.Muted})
+	}
+}
+
+// petBounds reports where the companion is drawn, or false when there is none.
+//
+// It recomputes the resources panel's geometry rather than storing the rectangle
+// during the draw, because the draw happens on the App's goroutine and a
+// click can arrive between frames; a stored rectangle would then describe a
+// layout the user is no longer looking at.
+func (st *UIState) petBounds(snap *Snapshot) (Rect, bool) {
+	if !st.Pet.Alive() {
+		return Rect{}, false
+	}
+	l := computeLayout(st.Width, st.Height, st.alertRows(snap))
+	if !l.HasSide {
+		return Rect{}, false
+	}
+	inner := Inner(l.Side.X, l.Side.Y+l.Side.H/2, l.Side.W, l.Side.H-l.Side.H/2, true)
+	if inner.Empty() {
+		return Rect{}, false
+	}
+	// Mirror resourcesPanel's row arithmetic: the cpu and mem gauges always
+	// take a row, and the process gauge only exists while stats are live.
+	y := inner.Y + 2
+	if snap.Stats.ProcsLimit > 0 {
+		y++
+	}
+	h := inner.Bottom() - y
+	if h < 4 {
+		return Rect{}, false
+	}
+	return Rect{X: inner.X, Y: y, W: inner.W, H: h}, true
+}
+
+// petPanelAt is the click target used by the handler.
+func (st *UIState) petPanelAt(m Mouse, snap *Snapshot) bool {
+	r, ok := st.petBounds(snap)
+	return ok && r.Contains(m.X, m.Y)
 }
 
 // meterColor grades a gauge by how full it is. The thresholds are deliberately

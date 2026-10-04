@@ -196,6 +196,12 @@ func (st *UIState) clickEvent(m Mouse, snap *Snapshot) event {
 		if ev, hit := st.railClick(m, l, snap); hit {
 			return ev
 		}
+		// The companion is petted before the list views claim the press, so a
+		// click on the animal is never read as a selection.
+		if st.petPanelAt(m, snap) {
+			st.Pet.Poke(snap.Now)
+			return event{kind: evNone}
+		}
 		if ev, hit := st.listClick(m, l, snap); hit {
 			return ev
 		}

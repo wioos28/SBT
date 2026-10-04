@@ -437,6 +437,10 @@ type UIState struct {
 	// whenever anything important is on screen.
 	Troll Troll
 
+	// Pet is the companion in the right column. Like Troll it is cosmetic and
+	// carries no capability; it can be petted but it cannot act.
+	Pet Pet
+
 	// Animation switches from the settings. With each off the interface draws
 	// the still frame of that effect rather than a different interface.
 	AlertAnim bool

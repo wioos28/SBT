@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"strings"
 	"time"
@@ -176,6 +177,9 @@ func (a *App) runFrame(now time.Time) {
 	if a.OnFrame != nil {
 		a.OnFrame(&a.Snap)
 	}
+	// The companion's clock is advanced from the frame clock rather than a timer
+	// of its own, so a still interface costs nothing extra.
+	a.State.Pet = a.State.Pet.Settle(now)
 	// The fun settings speak only when the interface is quiet; Poll returns
 	// nothing at all when a warning, a dialog or a run is in progress.
 	if line := a.State.Troll.Poll(now, a.State); line != "" {
@@ -191,8 +195,15 @@ func (a *App) runFrame(now time.Time) {
 //
 // The loop is deliberately not a busy timer. It waits for a key when the
 // interface is still and only wakes on a timer when there is motion to show.
-func (a *App) Run(ctx context.Context) error {
+//
+// A panic here is the worst failure this program has: the terminal is in raw
+// mode on the alternate screen, so an unrecovered panic leaves the user with an
+// unusable shell and no way back. The recovery therefore restores the terminal
+// first and only then reports, and it is installed on every path out of Run
+// rather than on the paths someone remembered.
+func (a *App) Run(ctx context.Context) (err error) {
 	defer a.Screen.Close()
+	defer a.recoverPanic(&err)
 	now := time.Now()
 	a.Snap.Now = now
 	a.State.InitRun = false
@@ -336,3 +347,26 @@ func policyFor(c PolicyChoice) policy.Preset {
 
 // joinArgs renders an argv for the transcript and the flash message.
 func joinArgs(argv []string) string { return strings.Join(argv, " ") }
+
+// recoverPanic turns a panic in the interface into a reported error.
+//
+// The order of the two defers in Run is the whole point: Close runs before this
+// one, because a deferred function runs last-in-first-out and Close was
+// registered first. By the time this executes the terminal is already out of
+// raw mode and off the alternate screen, so the user gets their shell back even
+// if the report itself goes wrong.
+//
+// A recovered panic is reported rather than swallowed. Hiding it would leave the
+// user staring at a cage that quietly stopped working, which is the failure mode
+// this program exists to avoid.
+func (a *App) recoverPanic(err *error) {
+	r := recover()
+	if r == nil {
+		return
+	}
+	// Deliberately not fatal: a drawing fault in one view must not take down a
+	// session that is holding a running sandbox.
+	if *err == nil {
+		*err = fmt.Errorf("the interface hit an internal error and was closed safely: %v", r)
+	}
+}
