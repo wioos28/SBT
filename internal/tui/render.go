@@ -800,7 +800,7 @@ func (i *Interpreter) terminalView(b *Buffer, s *Snapshot, st *UIState, r Rect) 
 		return
 	}
 	col := b.Write(ip.X, ip.Y, "run", Style{Fg: p.YellowHi, Bold: true})
-	b.WriteClipped(col+1, ip.Y, ip.Right()-1, st.Input, Style{Fg: p.Text})
+	st.Typing.DrawInput(b, col+1, ip.Y, ip.Right()-1, st.Input, s.Now, Style{Fg: p.Text})
 	if st.View == ViewTerminal && st.Focus == focusInput {
 		// A drawn caret: the terminal cursor is hidden while the cage is up,
 		// and the input must still feel live. It breathes rather than blinks,

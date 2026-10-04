@@ -254,6 +254,7 @@ func (st *UIState) terminalKey(k Key, snap *Snapshot) event {
 			return event{kind: evNone}
 		}
 		st.Input = ""
+		st.Typing.Reset()
 		return event{kind: evRun, argv: argv}
 	case KeyBackspace:
 		if st.Focus != focusInput {
@@ -264,6 +265,7 @@ func (st *UIState) terminalKey(k Key, snap *Snapshot) event {
 			r := []rune(st.Input)
 			st.Input = string(r[:len(r)-1])
 		}
+		st.Typing.Sync(snap.Now, st.Input)
 		return event{kind: evNone}
 	case KeyUp, KeyDown, KeyPgUp, KeyPgDn, KeyHome, KeyEnd:
 		// The transcript follows the newest lines; scrolling comes with the
@@ -273,6 +275,7 @@ func (st *UIState) terminalKey(k Key, snap *Snapshot) event {
 	if k.Type == KeyRune && !k.Ctrl {
 		st.Focus = focusInput
 		st.Input += string(k.Rune)
+		st.Typing.Sync(snap.Now, st.Input)
 		return event{kind: evNone}
 	}
 	return event{kind: evNone}

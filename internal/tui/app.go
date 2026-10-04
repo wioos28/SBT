@@ -134,6 +134,10 @@ func (a *App) needsFrames() bool {
 	if a.State.Busy.Active || len(a.State.Toasts.Live(a.Snap.Now)) > 0 {
 		return true
 	}
+	// A character in the input line that is still lit is visibly animating.
+	if a.State.Typing.Live(a.Snap.Now) {
+		return true
+	}
 	// A view that is still easing in is visibly moving.
 	if p := a.State.Transition.Progress(a.Snap.Now); p < 1 {
 		return true

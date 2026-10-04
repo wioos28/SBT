@@ -399,6 +399,7 @@ type UIState struct {
 	ListScroll int
 
 	Input      string
+	Typing     TypingState
 	Transcript Transcript
 
 	Palette   PaletteState
