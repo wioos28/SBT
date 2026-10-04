@@ -52,6 +52,9 @@ const (
 	ActBack
 	// ActToggleTheme swaps between the white and the dark ground.
 	ActToggleTheme
+	// ActRepairCage re-runs the platform probe and re-samples the monitor. It
+	// repairs the cage; it never disables a check to make the cage look healthy.
+	ActRepairCage
 	// ActDestroy opens the typed confirmation for the sandbox wipe. It is a
 	// distinct action because reaching it must always go through the phrase.
 	ActDestroy
@@ -206,6 +209,8 @@ func DefaultCommands() CommandSet {
 			Filter: []string{"light", "dark", "white", "colours"}},
 		{Title: "dismiss warnings", Hint: "", Group: "view", Action: Action{Kind: ActDismissWarnings},
 			Filter: []string{"clear", "toast", "notice"}},
+		{Title: "repair cage", Hint: "", Group: "act", Action: Action{Kind: ActRepairCage},
+			Filter: []string{"reinit", "re-check", "probe", "fix", "restore"}},
 		{Title: "destroy sandbox", Hint: "", Group: "danger", Action: Action{Kind: ActDestroy},
 			Filter: []string{"wipe", "delete", "reset", "critical"}},
 		{Title: "exit", Hint: "ctrl+d", Group: "danger", Action: Action{Kind: ActExit},

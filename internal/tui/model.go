@@ -337,6 +337,9 @@ const (
 	ReqDiff
 	// ReqOpenPolicy asks the session to change the policy of the next sandbox.
 	ReqOpenPolicy
+	// ReqRepairCage asks the session to re-initialise the cage: re-run the
+	// probe and re-sample the monitor. It repairs, it never disables.
+	ReqRepairCage
 	// ReqDestroy is the explicit sandbox destruction. The session only ever
 	// receives it after the user typed the exact confirmation phrase.
 	ReqDestroy
@@ -362,6 +365,9 @@ type Request struct {
 	// Key and Value carry a settings change.
 	Key   string
 	Value any
+	// Scope records which answer the user gave to a permission prompt. It is
+	// context for the session, not a grant: the cage is unchanged either way.
+	Scope PermissionChoice
 }
 
 // RunRequest builds a run request.

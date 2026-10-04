@@ -137,6 +137,9 @@ func (i *Interpreter) Render(s *Snapshot, st *UIState) *Buffer {
 	if anyConfirmOpen(st) {
 		i.drawConfirm(b, st)
 	}
+	if st.Permission.Open {
+		i.drawPermission(b, st)
+	}
 	i.clock(b, st, now)
 	return b
 }

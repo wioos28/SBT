@@ -66,6 +66,8 @@ type event struct {
 	// skey and sval carry a settings change the view validated and wants stored.
 	skey string
 	sval any
+	// scope records which answer the user gave to a permission prompt.
+	scope PermissionChoice
 }
 
 type eventKind int
@@ -97,6 +99,8 @@ const (
 	evSetDest
 	// evSetSetting carries one validated settings change to the session.
 	evSetSetting
+	// evRepair asks the session to re-initialise the cage after a broken probe.
+	evRepair
 	// evDestroy is the sandbox wipe. It is only ever raised after the user typed
 	// the exact phrase, so no key combination can reach it by accident.
 	evDestroy
@@ -122,6 +126,9 @@ func (e event) wantsSession() bool {
 // mean "back out one step" rather than "whatever the bottom layer would do".
 func (st *UIState) handleKey(k Key, snap *Snapshot) event {
 	st.LastKeyAt = snap.Now
+	if st.Permission.Open {
+		return st.permissionKey(k, snap)
+	}
 	if st.Confirm.Kind != ConfirmNone {
 		return st.confirmKey(k, snap)
 	}
@@ -282,9 +289,18 @@ func (st *UIState) terminalKey(k Key, snap *Snapshot) event {
 		if len(argv) == 0 {
 			return event{kind: evNone}
 		}
+		// A run the host cannot isolate is asked about, never silently refused
+		// and never silently allowed. The prompt states the capability, why it
+		// is needed and the risk, and the user decides.
+		if snap.Sandbox.Unavailable != "" && !st.PermAcknowledged {
+			cap, reason, risk, detail := blockingCapability(snap)
+			st.Input = ""
+			st.Typing.Reset()
+			return st.openPermission(cap, reason, risk, detail, argv)
+		}
 		st.Input = ""
 		st.Typing.Reset()
-		return event{kind: evRun, argv: argv}
+		return event{kind: evRun, argv: argv, scope: scopeOf(st)}
 	case KeyLeft, KeyRight:
 		if len(snap.Files) == 0 {
 			return event{kind: evNone}
@@ -617,6 +633,8 @@ func (st *UIState) runAction(a Action, snap *Snapshot) event {
 		} else {
 			st.flash("animation off", StateOK, snap.Now)
 		}
+	case ActRepairCage:
+		return event{kind: evRepair}
 	case ActDestroy:
 		return st.askDestroy(snap)
 	case ActToggleTheme:
@@ -1006,9 +1024,53 @@ func (st *UIState) slashCommand(text string, snap *Snapshot) event {
 		return event{kind: evSetSetting, skey: "language.locale", sval: args[0]}
 	case "destroy", "wipe":
 		return st.askDestroy(snap)
+	case "repair", "reinit":
+		st.flash("re-running the platform probe", StateMeta, snap.Now)
+		return event{kind: evRepair}
 	case "exit", "quit":
 		return st.askExit(snap)
 	}
 	st.flash("unknown command /"+name+"  -  try /help", StateWarn, snap.Now)
 	return event{kind: evNone}
+}
+
+// blockingCapability turns the measured report into the four lines the prompt
+// needs: the capability that is missing, the SBT feature that wants it, the
+// honest risk of proceeding without it, and the evidence.
+func blockingCapability(snap *Snapshot) (capability, reason, risk, detail string) {
+	capability = "verified isolation"
+	reason = "running a command inside the sandbox"
+	risk = "the command will not run in a verified sandbox"
+	detail = snap.Sandbox.Unavailable
+	for _, row := range snap.Permissions.Rows {
+		if row.State != StateDanger {
+			continue
+		}
+		capability = row.Name
+		reason = row.Feature
+		if reason == "" {
+			reason = "running a command inside the sandbox"
+		}
+		risk = "the command runs with reduced isolation"
+		detail = row.Reason
+		break
+	}
+	if detail == "" {
+		detail = snap.ProbeFail
+	}
+	return capability, reason, risk, detail
+}
+
+// scopeOf reports which acknowledgement the user already gave this session.
+func scopeOf(st *UIState) PermissionChoice {
+	if st.PermAcknowledged {
+		return PermAllowSession
+	}
+	return PermAllowOnce
+}
+
+// notePermissionAnswer records the answer so the prompt is not asked twice for
+// the same session. It never changes the cage.
+func (st *UIState) notePermissionAnswer(choice PermissionChoice) {
+	st.PermAcknowledged = choice == PermAllowSession
 }

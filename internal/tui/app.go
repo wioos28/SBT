@@ -283,6 +283,9 @@ func (a *App) apply(ev event, now time.Time) bool {
 	case evExit:
 		a.Emit(Request{Kind: ReqExit})
 		return true
+	case evRepair:
+		a.State.flash("re-initialising the cage…", StateMeta, now)
+		a.Emit(Request{Kind: ReqRepairCage})
 	case evDestroy:
 		a.State.flash("destroying the sandbox…", StateWarn, now)
 		a.Emit(Request{Kind: ReqDestroy})

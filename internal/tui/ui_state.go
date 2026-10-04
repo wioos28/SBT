@@ -433,6 +433,14 @@ type UIState struct {
 	// decoratively.
 	Alert AlertState
 
+	// Permission is a pending PERMISSION REQUIRED dialog. It is the most modal
+	// thing in the cage: nothing behind it takes a key while it is open.
+	Permission PermissionState
+	// PermAcknowledged records that the user chose "Allow for the session", so
+	// SBT stops asking. It never relaxes the cage - it only stops repeating the
+	// question.
+	PermAcknowledged bool
+
 	Settings   SettingsState
 	Files      FilesRow
 	Typing     TypingState

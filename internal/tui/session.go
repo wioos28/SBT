@@ -465,6 +465,8 @@ func (s *Session) Handle(ctx context.Context, req Request) {
 		s.diffRequest(req, now)
 	case ReqOpenPolicy:
 		s.SetPreset(policyFor(req.Choice))
+	case ReqRepairCage:
+		s.repairCage(time.Now())
 	case ReqDestroy:
 		s.destroyRequest(time.Now())
 	case ReqSetSetting:
@@ -701,4 +703,23 @@ func (s *Session) updateConfinement(dst *Snapshot) {
 		Permissions: "MAPPED USER  " + policyWord(s.preset.Mode, s.preset),
 		Since:       dst.Now,
 	}
+}
+
+// repairCage re-initialises the cage after a broken probe.
+//
+// Repair means exactly that: re-run the platform probe, re-sample the monitor,
+// re-derive the verdict. It never disables a check, never relaxes the policy and
+// never turns a broken cage into a healthy-looking one - if isolation still
+// cannot be verified, the answer is still BROKEN and nothing runs.
+func (s *Session) repairCage(now time.Time) {
+	ui := s.App.State
+	s.Refresh()
+	s.snapshotInto(&s.App.Snap)
+	verdict := s.App.Snap.Cage.State
+	if verdict == CageBroken || verdict == CageLimited {
+		ui.Toasts.Notify(StateDanger, "cage is still "+verdict.Label(),
+			"the probe ran again and could not verify isolation: "+s.App.Snap.ProbeFail, now)
+		return
+	}
+	ui.Toasts.Notify(StateOK, "cage re-initialised", "probe re-ran: "+verdict.Label(), now)
 }
