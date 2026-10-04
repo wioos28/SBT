@@ -390,6 +390,24 @@ type Confirm struct {
 // UIState is everything the interface remembers between frames. It is plain
 // data: no goroutines, no locks, no I/O - which is what makes the keyboard
 // behaviour testable without a terminal.
+// FilesRow is the file strip under the terminal: which file is selected, and
+// whether the strip itself is shown. It is deliberately one line - the point is
+// to keep recently touched paths in view without costing workspace rows.
+type FilesRow struct {
+	Index int
+	Shown bool
+}
+
+// Clamp keeps the cursor inside the list.
+func (fr *FilesRow) Clamp(n int) {
+	if fr.Index >= n {
+		fr.Index = n - 1
+	}
+	if fr.Index < 0 {
+		fr.Index = 0
+	}
+}
+
 type UIState struct {
 	Width, Height int
 
@@ -400,6 +418,7 @@ type UIState struct {
 
 	Input      string
 	Settings   SettingsState
+	Files      FilesRow
 	Typing     TypingState
 	Transcript Transcript
 

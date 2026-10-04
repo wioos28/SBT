@@ -4,6 +4,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/wioos28/sbt/internal/config"
 	"github.com/wioos28/sbt/internal/shared/policy"
 )
 
@@ -258,6 +259,22 @@ func (st *UIState) menuKey(k Key, snap *Snapshot) (event, bool) {
 func (st *UIState) terminalKey(k Key, snap *Snapshot) event {
 	switch k.Type {
 	case KeyEnter:
+		text := strings.TrimSpace(st.Input)
+		if text == "" {
+			// An empty input line with files in the strip means the user wants
+			// to open the selected file, not to run nothing.
+			if st.Files.Shown && len(snap.Files) > 0 {
+				st.Files.Clamp(len(snap.Files))
+				st.SetView(ViewFiles, snap.Now)
+				st.List.Index = st.Files.Index
+			}
+			return event{kind: evNone}
+		}
+		if strings.HasPrefix(text, "/") {
+			st.Input = ""
+			st.Typing.Reset()
+			return st.slashCommand(text, snap)
+		}
 		argv := fields(st.Input)
 		if len(argv) == 0 {
 			return event{kind: evNone}
@@ -265,6 +282,19 @@ func (st *UIState) terminalKey(k Key, snap *Snapshot) event {
 		st.Input = ""
 		st.Typing.Reset()
 		return event{kind: evRun, argv: argv}
+	case KeyLeft, KeyRight:
+		if len(snap.Files) == 0 {
+			return event{kind: evNone}
+		}
+		st.Files.Clamp(len(snap.Files))
+		if k.Type == KeyLeft {
+			if st.Files.Index > 0 {
+				st.Files.Index--
+			}
+		} else if st.Files.Index < len(snap.Files)-1 {
+			st.Files.Index++
+		}
+		return event{kind: evNone}
 	case KeyBackspace:
 		if st.Focus != focusInput {
 			st.Focus = focusInput
@@ -845,3 +875,67 @@ func formatBytes(n int64) string {
 }
 
 func formatDuration(d time.Duration) string { return d.String() }
+
+// slashCommand runs an in-session command typed into the input line.
+//
+// These exist so the common actions are reachable by name as well as by key,
+// without the user having to remember an alt+<n> binding. An unknown command
+// says so plainly instead of being handed to a sandbox, which is the whole
+// point: a typo must never turn into a command that runs.
+func (st *UIState) slashCommand(text string, snap *Snapshot) event {
+	parts := strings.Fields(strings.TrimPrefix(text, "/"))
+	if len(parts) == 0 {
+		return event{kind: evNone}
+	}
+	name := strings.ToLower(parts[0])
+	args := parts[1:]
+	goTo := func(v View) event {
+		st.SetView(v, snap.Now)
+		st.Focus = focusWorkspace
+		return event{kind: evNone}
+	}
+	switch name {
+	case "help", "?":
+		return goTo(ViewHelp)
+	case "setting", "settings", "config":
+		return goTo(ViewSettings)
+	case "status":
+		return goTo(ViewStatus)
+	case "files":
+		return goTo(ViewFiles)
+	case "changes":
+		return goTo(ViewChanges)
+	case "export":
+		return goTo(ViewExport)
+	case "permissions", "perms", "security":
+		return goTo(ViewPermissions)
+	case "session", "terminal", "term":
+		return goTo(ViewTerminal)
+	case "clear":
+		st.Transcript.Lines = nil
+		st.flash("transcript cleared", StateMeta, snap.Now)
+		return event{kind: evNone}
+	case "theme":
+		if len(args) == 0 {
+			st.flash("usage: /theme "+strings.Join(config.ChoiceValues("ui.theme"), "|"), StateMeta, snap.Now)
+			return event{kind: evNone}
+		}
+		return event{kind: evSetSetting, skey: "ui.theme", sval: args[0]}
+	case "palette":
+		if len(args) == 0 {
+			st.flash("usage: /palette "+strings.Join(config.ChoiceValues("ui.palette"), "|"), StateMeta, snap.Now)
+			return event{kind: evNone}
+		}
+		return event{kind: evSetSetting, skey: "ui.palette", sval: args[0]}
+	case "lang", "language":
+		if len(args) == 0 {
+			st.flash("usage: /language "+strings.Join(config.ChoiceValues("language.locale"), "|"), StateMeta, snap.Now)
+			return event{kind: evNone}
+		}
+		return event{kind: evSetSetting, skey: "language.locale", sval: args[0]}
+	case "exit", "quit":
+		return st.askExit(snap)
+	}
+	st.flash("unknown command /"+name+"  -  try /help", StateWarn, snap.Now)
+	return event{kind: evNone}
+}
