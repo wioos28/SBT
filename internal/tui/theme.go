@@ -26,6 +26,10 @@ func Hex(v uint32) RGB { return RGB{R: uint8(v >> 16), G: uint8(v >> 8), B: uint
 
 // Palette is the SBT colour set, exactly as specified for the product.
 type Palette struct {
+	// Name identifies the preset ("sbt", "cyber", "minimal", "ocean", "mono",
+	// "light"). It is shown in the top bar so the active look is never a guess.
+	Name string
+
 	Bg       RGB
 	BgTop    RGB
 	BgBottom RGB
@@ -40,6 +44,12 @@ type Palette struct {
 	Muted    RGB
 	Border   RGB
 	Warning  RGB
+
+	// Brand colours. Primary is the identity accent, Secondary its lighter pair,
+	// Info is the cyan used for the typing sweep and informational accents.
+	Primary   RGB
+	Secondary RGB
+	Info      RGB
 }
 
 // DefaultPalette is the SBT palette: a white-forward dark scheme.
@@ -52,13 +62,14 @@ type Palette struct {
 // PROTECTED and BROKEN look identical at a glance, so they keep their colour
 // and their word.
 var DefaultPalette = Palette{
+	Name:     "sbt",
 	Bg:       Hex(0x0A0C10),
 	BgTop:    Hex(0x12151C),
 	BgBottom: Hex(0x0D1015),
 	Surface:  Hex(0x111419),
 	Surface2: Hex(0x171B22),
-	Yellow:   Hex(0xF7D046),
-	YellowHi: Hex(0xE8BC2F),
+	Yellow:   Hex(0xFF8A00),
+	YellowHi: Hex(0xE07400),
 	Green:    Hex(0x34D399),
 	Red:      Hex(0xFF6B6B),
 	Text:     Hex(0xFFFFFF),
@@ -66,6 +77,10 @@ var DefaultPalette = Palette{
 	Muted:    Hex(0x8B95A7),
 	Border:   Hex(0x2B323D),
 	Warning:  Hex(0xFBBF24),
+
+	Primary:   Hex(0xFF8A00),
+	Secondary: Hex(0xFFB347),
+	Info:      Hex(0x00D9FF),
 }
 
 // LightPalette is the same interface on a white ground.
@@ -75,6 +90,7 @@ var DefaultPalette = Palette{
 // produces pastels that are unreadable in daylight - which is exactly the
 // situation a light theme is for.
 var LightPalette = Palette{
+	Name:     "light",
 	Bg:       Hex(0xFFFFFF),
 	BgTop:    Hex(0xF7F9FC),
 	BgBottom: Hex(0xF1F4F9),
@@ -89,6 +105,10 @@ var LightPalette = Palette{
 	Muted:    Hex(0x5B6678),
 	Border:   Hex(0xC8D2E0),
 	Warning:  Hex(0xC2410C),
+
+	Primary:   Hex(0xB45309),
+	Secondary: Hex(0x92400E),
+	Info:      Hex(0x0E7490),
 }
 
 // ColorDepth is how much colour the terminal can take.
@@ -164,6 +184,10 @@ type Theme struct {
 	// Light records which ground is in use, so the menu can show the current
 	// choice and the status bar can name it.
 	Light bool
+	// Preset is the dark-ground palette name currently selected ("sbt", "cyber",
+	// ...). It is remembered so switching to the light ground and back restores
+	// the user's chosen preset rather than resetting to the default.
+	Preset string
 }
 
 // NewTheme builds the theme for a terminal.
@@ -185,6 +209,10 @@ func NewTheme(p Palette) *Theme {
 func NewThemeAuto() *Theme {
 	t := NewTheme(paletteForEnv())
 	t.Light = t.Palette == LightPalette
+	t.Preset = t.Palette.Name
+	if t.Preset == "" {
+		t.Preset = "sbt"
+	}
 	return t
 }
 
@@ -233,9 +261,22 @@ func (t *Theme) SetLight(light bool) {
 	if light {
 		t.Palette = LightPalette
 	} else {
-		t.Palette = DefaultPalette
+		t.Palette = darkPaletteFor(t.Preset)
 	}
 	t.Light = light
+}
+
+// SetPreset selects a dark-ground palette preset. On the light ground it only
+// records the choice: the light palette is a purpose-built ground, not a preset,
+// and switching to it is what ToggleLight is for.
+func (t *Theme) SetPreset(name string) {
+	if name == "" {
+		name = "sbt"
+	}
+	t.Preset = name
+	if !t.Light {
+		t.Palette = darkPaletteFor(name)
+	}
 }
 
 // ToggleLight flips the theme and reports which ground is now in use.
