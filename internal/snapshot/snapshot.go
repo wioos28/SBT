@@ -111,9 +111,9 @@ func baseDir() string {
 	}
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
-		return filepath.Join(".", ".sbt", "snapshots")
+		return filepath.Join(".", ".sbt-wioos28", "snapshots")
 	}
-	return filepath.Join(home, ".sbt", "snapshots")
+	return filepath.Join(home, ".sbt-wioos28", "snapshots")
 }
 
 // BaseDir returns the directory that holds every snapshot.

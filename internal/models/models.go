@@ -113,9 +113,9 @@ func Root() string {
 	}
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
-		return filepath.Join(".", ".sbt", "models")
+		return filepath.Join(".", ".sbt-wioos28", "models")
 	}
-	return filepath.Join(home, ".sbt", "models")
+	return filepath.Join(home, ".sbt-wioos28", "models")
 }
 
 func registryPath() string { return filepath.Join(Root(), "registry.json") }

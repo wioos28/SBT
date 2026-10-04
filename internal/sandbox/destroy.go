@@ -134,9 +134,9 @@ func logRoot() string {
 	}
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
-		return filepath.Join(".", ".sbt", "logs")
+		return filepath.Join(".", ".sbt-wioos28", "logs")
 	}
-	return filepath.Join(home, ".sbt", "logs")
+	return filepath.Join(home, ".sbt-wioos28", "logs")
 }
 
 // discardWorkspace removes the sandbox's isolated workspace copy via the
@@ -158,7 +158,7 @@ func workspaceBase() string {
 	}
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
-		return filepath.Join(".", ".sbt", "workspaces")
+		return filepath.Join(".", ".sbt-wioos28", "workspaces")
 	}
-	return filepath.Join(home, ".sbt", "workspaces")
+	return filepath.Join(home, ".sbt-wioos28", "workspaces")
 }

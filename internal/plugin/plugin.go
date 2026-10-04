@@ -65,9 +65,9 @@ func root() string {
 	}
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
-		return filepath.Join(".", ".sbt", "plugins")
+		return filepath.Join(".", ".sbt-wioos28", "plugins")
 	}
-	return filepath.Join(home, ".sbt", "plugins")
+	return filepath.Join(home, ".sbt-wioos28", "plugins")
 }
 
 func manifestPath(name string) string { return filepath.Join(root(), name, "plugin.json") }

@@ -43,9 +43,9 @@ func sbtHome() string {
 	}
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
-		return filepath.Join(".", ".sbt")
+		return filepath.Join(".", ".sbt-wioos28")
 	}
-	return filepath.Join(home, ".sbt")
+	return filepath.Join(home, ".sbt-wioos28")
 }
 
 // SetRoot binds a scope to a directory.

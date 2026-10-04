@@ -44,9 +44,9 @@ func LocaleDir() string {
 	}
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
-		return filepath.Join(".", ".sbt", "locales")
+		return filepath.Join(".", ".sbt-wioos28", "locales")
 	}
-	return filepath.Join(home, ".sbt", "locales")
+	return filepath.Join(home, ".sbt-wioos28", "locales")
 }
 
 // BuiltinLocales lists the languages shipped with SBT.

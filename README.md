@@ -3,6 +3,21 @@ Sandbox terminal
 
 ## Install
 
+> **Name collision — read this first.** This project is called SBT, and so is the
+> Scala build tool. They are different programs. If you already use Scala sbt,
+> do **not** install this one as `sbt`: it would replace the Scala launcher.
+> Install it as `sandbox-terminal` instead, exactly as below.
+
+```sh
+go build -o ~/.local/bin/sandbox-terminal .
+```
+
+State lives in **`~/.sbt-wioos28/`**, deliberately not `~/.sbt` - that directory
+belongs to the Scala build tool and this project will not write into it.
+Override it with `SBT_HOME` if you want it somewhere else.
+
+## Install (Scala sbt users)
+
 ```sh
 go install github.com/wioos28/sbt@latest   # module builds
 # or from a checkout:

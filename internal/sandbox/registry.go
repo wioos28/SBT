@@ -28,9 +28,9 @@ func StateRoot() string {
 	}
 	home, err := os.UserHomeDir()
 	if err != nil || home == "" {
-		return filepath.Join(".", ".sbt", "sandboxes")
+		return filepath.Join(".", ".sbt-wioos28", "sandboxes")
 	}
-	return filepath.Join(home, ".sbt", "sandboxes")
+	return filepath.Join(home, ".sbt-wioos28", "sandboxes")
 }
 
 // Status describes the lifecycle state of a tracked sandbox.

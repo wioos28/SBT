@@ -96,9 +96,9 @@ func stateDir() string {
 		return v
 	}
 	if home, err := os.UserHomeDir(); err == nil && home != "" {
-		return filepath.Join(home, ".sbt")
+		return filepath.Join(home, ".sbt-wioos28")
 	}
-	return filepath.Join(".", ".sbt")
+	return filepath.Join(".", ".sbt-wioos28")
 }
 
 // probeDir reports whether SBT can create and write in dir.
