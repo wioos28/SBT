@@ -36,6 +36,12 @@ type App struct {
 	// closes it: the session owns its lifetime.
 	Out chan Request
 
+	// StartupAnim and ShowWelcome come from user settings. They are decided once,
+	// before the first frame, because a startup animation that changes midway is
+	// just a flicker.
+	StartupAnim bool
+	ShowWelcome bool
+
 	// OnFrame is called before every draw with the snapshot about to be drawn,
 	// so a session can sample the monitor on the cadence the user actually
 	// sees rather than on a timer that drifts away from the UI.
@@ -182,6 +188,13 @@ func (a *App) Run(ctx context.Context) error {
 	a.Snap.Now = now
 	a.State.InitRun = false
 	a.Screen.Resized()
+	a.State.Boot.Started = now
+	if err := a.PlayBoot(ctx); err != nil {
+		return err
+	}
+	if err := a.PlayWelcome(ctx); err != nil {
+		return err
+	}
 	a.runFrame(now)
 
 	for {

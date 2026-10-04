@@ -404,7 +404,7 @@ type UIState struct {
 	Palette   PaletteState
 	Export    ExportSel
 	Confirm   Confirm
-	Boot      BootState
+	Boot      BootSequence
 	Flash     Flash
 	LastKeyAt time.Time
 
