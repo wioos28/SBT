@@ -101,6 +101,45 @@ least-privilege step that would grant it. Nothing reports `ALLOWED` on an
 assumption, and a capability that cannot be measured reports `UNKNOWN` rather
 than being rounded up.
 
+### When the host cannot isolate
+
+Pressing enter on a command the host cannot isolate does not fail silently and
+does not run quietly. SBT asks:
+
+```
+PERMISSION REQUIRED
+Capability   Filesystem
+Reason       confining the sandbox filesystem
+Risk         the command runs with reduced isolation
+Evidence     mount namespace unavailable
+[ Allow once ]  [ Allow session ]  [ Configure ]  [ Cancel ]
+```
+
+**Allow is an acknowledgement, never a grant.** SBT cannot give itself a
+privilege it does not have, so what "Allow" does is record that the user was told
+what is missing, and let the session attempt the work - which still refuses
+anything it cannot verify, and still says exactly why. "Allow for the session"
+only stops SBT repeating the question; a test pins that it cannot change the cage
+verdict. The prompt is the most modal layer in the interface and opens on
+Cancel.
+
+`/repair` (or the palette) re-runs the platform probe and re-derives the verdict.
+If isolation still cannot be verified the answer is still **BROKEN**: repair never
+disables a check to make the cage look healthy.
+
+### Warnings and isolation
+
+A probe that cannot verify isolation raises a full-width banner with an orange
+glow and a border that **breathes rather than flashes**. It is keyed on the cage
+verdict, so an unchanged verdict does not restart its clock every frame, and a
+broken cage holds the banner up as critical rather than letting it fade while the
+session is still open.
+
+While a sandbox is running, an `ISOLATION ACTIVE` panel states the confined
+process, its id, the reason, and what filesystem, network and permissions are
+restricted to. Every field comes from measured state: the id from the sandbox,
+the command from the journal, the policy from the preset in force.
+
 ### Destroying the sandbox
 
 `/destroy`, or the palette and menu, opens a dialog that starts on the safe
@@ -129,6 +168,23 @@ bindings use, so the three ways of doing a thing can never disagree.
 still opens, the reports still work, and starting a command is **refused with
 the reason shown** — SBT will not run a command it cannot prove is isolated.
 See [docs/LIMITATIONS.md](docs/LIMITATIONS.md).
+
+## Language
+
+The interface text goes through one lookup with the English text as the fallback,
+so a locale that does not cover a key shows readable English rather than a raw
+key. **Vietnamese, English, Russian and Chinese** ship with translations for the
+section titles, the permission prompt, the typed-confirmation states, the welcome
+screen, the boot hints, the permission rows and the file strip; anything else
+falls back.
+
+Switch language from **Settings → Language** or `/language vi-VN`. It applies on
+the next frame - no restart.
+
+A custom language is a JSON file of `{"key": "text"}` dropped in
+`~/.sbt/locales/`, or `sbt language import <file>`. The destroy phrase is
+deliberately **not** translatable: it is a token the user types exactly, and
+translating it would break the guard rather than help it.
 
 ## Appearance
 
