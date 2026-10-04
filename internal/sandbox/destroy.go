@@ -10,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 )
 
 // Steps is the ordered, non-deceptive destruction report: each real phase SBT
@@ -36,9 +35,10 @@ func Freeze(name string) error {
 	if err != nil {
 		return err
 	}
-	if info.HelperPID > 0 {
-		_ = syscall.Kill(info.HelperPID, syscall.SIGSTOP)
-	}
+	// Signalling is a no-op on an OS with no freeze signal. The status change
+	// below still happens either way, so a sandbox is never left marked
+	// "running" in the registry just because the platform cannot pause it.
+	suspendProcess(info.HelperPID)
 	info.Status = StatusFrozen
 	return Save(info)
 }

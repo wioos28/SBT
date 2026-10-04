@@ -9,7 +9,6 @@ package main
 import (
 	"fmt"
 	"os"
-	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -28,12 +27,14 @@ const usage = `SBT — Sandbox Terminal
 
 Usage:
 
-  sbt doctor     verify platform isolation and host dependencies
-  sbt setting    inspect or change SBT settings
-  sbt language   list and manage language packs
-  sbt security   inspect the security posture and warnings
-  sbt version    print the build identity
-  sbt help       show this help
+  sbt             start the interactive sandbox cage (full-screen interface)
+  sbt shell       the line-oriented session, without a full-screen interface
+  sbt doctor      verify platform isolation and host dependencies
+  sbt setting     inspect or change SBT settings
+  sbt language    list and manage language packs
+  sbt security    inspect the security posture and warnings
+  sbt version     print the build identity
+  sbt help        show this help
 
 Hidden helper modes are not part of the CLI surface; they are selected by the
 SBT_INTERNAL_MODE environment variable when SBT re-executes itself.`
@@ -47,10 +48,13 @@ func main() {
 
 	args := os.Args[1:]
 	if len(args) == 0 {
-		// Interactive terminal: launch the sandbox shell. Without a terminal
-		// (pipes, scripts) print the usage so output stays parseable.
-		if runtime.GOOS == "linux" && ui.IsTerminal(os.Stdout) && ui.IsTerminal(os.Stdin) {
-			os.Exit(shell.Run())
+		// Interactive terminal: launch the sandbox cage. This is offered on
+		// every platform, not just the ones SBT can isolate: the interface, the
+		// review view and the reports all work anywhere, and the runner says
+		// plainly when it will not start a command. Without a terminal (pipes,
+		// scripts) print the usage so output stays parseable.
+		if ui.IsTerminal(os.Stdout) && ui.IsTerminal(os.Stdin) {
+			os.Exit(shell.RunSession())
 		}
 		fmt.Println(version.String())
 		fmt.Println(usage)
@@ -66,6 +70,11 @@ func main() {
 		os.Exit(language(args[1:]))
 	case "security":
 		os.Exit(securityCmd(args[1:]))
+	case "shell", "repl":
+		// The line-oriented session, kept as an explicit choice: it is the
+		// fallback for a terminal the full-screen interface cannot drive, and
+		// the only mode that works over a serial line or a very small window.
+		os.Exit(shell.Run())
 	case "version", "--version", "-v":
 		fmt.Println(version.String())
 	case "help", "--help", "-h":
