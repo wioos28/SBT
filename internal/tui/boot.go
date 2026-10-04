@@ -225,7 +225,10 @@ func (i *Interpreter) Boot(b *Buffer, boot *BootSequence, now time.Time) {
 			px = 0
 		}
 		b.WriteClipped(px, progY, px+pw, progressBar(shown, pw), Style{Fg: p.Primary})
-		b.WriteClipped(px+pw+1, progY, w, itoa(int(prog*100+0.5))+"%", Style{Fg: p.Muted})
+		// The number tracks the bar, not the raw count, so the two never
+		// disagree on screen. The raw count still decides which stage rows are
+		// allowed to show a tick.
+		b.WriteClipped(px+pw+1, progY, w, itoa(int(shown/float64(len(boot.Stages))*100+0.5))+"%", Style{Fg: p.Muted})
 	}
 
 	y := progY + 2
