@@ -137,6 +137,14 @@ func (s *Session) applySettings() {
 		colour,
 	)
 	app.StartupAnim = s.settingBool("anim.startup", true) && s.settingBool("ui.animations", true)
+	app.State.AlertAnim = s.settingBool("anim.warnings", true) && s.settingBool("ui.animations", true)
+	app.State.GlowAnim = s.settingBool("anim.glow", true) && s.settingBool("ui.animations", true)
+	app.State.MenuAnim = s.settingBool("anim.menu", true) && s.settingBool("ui.animations", true)
+	app.State.Troll.Configure(
+		s.settingBool("troll.enabled", false),
+		s.settingInt("troll.frequency", 15),
+		s.settingInt("troll.intensity", 30),
+	)
 	app.ShowWelcome = s.settingBool("ui.welcome", true)
 	if app.Interp != nil {
 		app.Interp.Theme = app.Theme

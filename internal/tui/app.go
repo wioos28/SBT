@@ -176,6 +176,11 @@ func (a *App) runFrame(now time.Time) {
 	if a.OnFrame != nil {
 		a.OnFrame(&a.Snap)
 	}
+	// The fun settings speak only when the interface is quiet; Poll returns
+	// nothing at all when a warning, a dialog or a run is in progress.
+	if line := a.State.Troll.Poll(now, a.State); line != "" {
+		a.State.flash(line, StateMeta, now)
+	}
 	frame := a.Interp.Render(&a.Snap, a.State)
 	a.Screen.cur.CopyFrom(frame)
 	a.Screen.Present()

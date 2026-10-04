@@ -83,7 +83,7 @@ func (a AlertState) Pulse(now time.Time, motion bool) float64 {
 // pulse lives in the colour, never in the text: the wording must stay readable
 // at every frame, which is also why a critical event breathes faster but never
 // strobes.
-func (i *Interpreter) alertBanner(b *Buffer, a AlertState, w, y int, now time.Time) int {
+func (i *Interpreter) alertBanner(b *Buffer, a AlertState, w, y int, now time.Time, anim bool) int {
 	if !a.Active(now) || y < 0 || y >= b.H {
 		return y
 	}
@@ -95,7 +95,7 @@ func (i *Interpreter) alertBanner(b *Buffer, a AlertState, w, y int, now time.Ti
 		accent = p.Red
 	}
 	accent = Mix(p.Surface2, accent, 0.55+0.45*fade)
-	if pulse := a.Pulse(now, t.Motion); pulse > 0 {
+	if pulse := a.Pulse(now, t.Motion && anim); pulse > 0 {
 		accent = Glow(accent, 0.25*pulse)
 	}
 	b.Fill(0, y, w, 1, ' ', Style{Bg: accent, HasBg: true, Fg: p.Text})
@@ -130,7 +130,7 @@ type IsolationState struct {
 // It is deliberately factual: what is confined, under which id, why, and what
 // each dimension is restricted to. The user is meant to be able to read this
 // and understand the confinement without opening a second screen.
-func (i *Interpreter) isolationPanel(b *Buffer, iso IsolationState, st *UIState, now time.Time) {
+func (i *Interpreter) isolationPanel(b *Buffer, iso IsolationState, st *UIState, now time.Time, glow bool) {
 	if !iso.Active || st.Width < 34 || st.Height < 10 {
 		return
 	}
@@ -150,7 +150,7 @@ func (i *Interpreter) isolationPanel(b *Buffer, iso IsolationState, st *UIState,
 		y = 2
 	}
 	accent := p.Primary
-	if t.Motion {
+	if t.Motion && glow {
 		if pulse := Breath(now, iso.Since, PulsePeriod); pulse > 0 {
 			accent = Glow(accent, 0.2*pulse)
 		}

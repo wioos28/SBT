@@ -104,7 +104,7 @@ func (i *Interpreter) Render(s *Snapshot, st *UIState) *Buffer {
 		i.menuBar(b, s, st, w)
 	}
 	if l.HasAlert {
-		i.alertBanner(b, st.Alert, w, l.AlertY, now)
+		i.alertBanner(b, st.Alert, w, l.AlertY, now, st.AlertAnim)
 	}
 	i.rail(b, s, st, l)
 	if l.HasSide {
@@ -124,7 +124,7 @@ func (i *Interpreter) Render(s *Snapshot, st *UIState) *Buffer {
 	i.toasts(b, s, st)
 	// The isolation evidence sits above the toasts but below the modals: it is
 	// a fact the user may want to read while a dialog is open, not a blocker.
-	i.isolationPanel(b, s.Confinement, st, now)
+	i.isolationPanel(b, s.Confinement, st, now, st.GlowAnim)
 	// The dropdown is drawn above the workspace but below the modal overlays: a
 	// menu is a shortcut, and a confirmation about something the menu started
 	// must not be half-covered by it.

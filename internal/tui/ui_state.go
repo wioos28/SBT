@@ -433,6 +433,16 @@ type UIState struct {
 	// decoratively.
 	Alert AlertState
 
+	// Troll is the cosmetic fun feature. It is off by default and stays silent
+	// whenever anything important is on screen.
+	Troll Troll
+
+	// Animation switches from the settings. With each off the interface draws
+	// the still frame of that effect rather than a different interface.
+	AlertAnim bool
+	GlowAnim  bool
+	MenuAnim  bool
+
 	// Permission is a pending PERMISSION REQUIRED dialog. It is the most modal
 	// thing in the cage: nothing behind it takes a key while it is open.
 	Permission PermissionState
