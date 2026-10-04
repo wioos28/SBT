@@ -161,11 +161,13 @@ func TestEveryMenuRowIsNamedAndActed(t *testing.T) {
 // The help text must name the keys that actually exist.
 func TestHelpLinesMatchTheRealBindings(t *testing.T) {
 	joined := strings.Join(HelpLines, "\n")
-	if len(helpViews) != 6 {
-		t.Fatalf("expected 6 views, got %d", len(helpViews))
+	if len(helpViews) != len(Views()) {
+		t.Fatalf("the help view list must be the real view list: %d vs %d",
+			len(helpViews), len(Views()))
 	}
-	if !strings.Contains(joined, "alt+1..6") {
-		t.Fatalf("the help must name the real view range, got:\n%s", joined)
+	wantRange := "alt+1.." + Views()[len(Views())-1].Shortcut()[len("alt+"):]
+	if !strings.Contains(joined, wantRange) {
+		t.Fatalf("the help must name the real view range %q, got:\n%s", wantRange, joined)
 	}
 	for _, want := range []string{"f10", "ctrl+k", "ctrl+d", "enter"} {
 		if !strings.Contains(joined, want) {

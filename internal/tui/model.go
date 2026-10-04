@@ -65,7 +65,7 @@ func osGetenv(k string) string { return os.Getenv(k) }
 var HelpLines = helpLines()
 
 // helpViews is every view the rail and the menu can reach.
-var helpViews = []View{ViewTerminal, ViewFiles, ViewChanges, ViewStatus, ViewExport, ViewHelp}
+var helpViews = Views()
 
 func helpLines() []string {
 	lines := []string{
@@ -105,7 +105,16 @@ const (
 	ViewStatus
 	ViewExport
 	ViewHelp
+	ViewSettings
+	ViewPermissions
 )
+
+// Views lists every view in rail order. It is the single source of truth for the
+// alt+<n> range, the rail and the switch-view help line, so a view can never be
+// added to one of those and forgotten in the others.
+func Views() []View {
+	return []View{ViewTerminal, ViewFiles, ViewChanges, ViewStatus, ViewExport, ViewHelp, ViewSettings, ViewPermissions}
+}
 
 // Name is the rail label of a view.
 func (v View) Name() string {
@@ -120,6 +129,10 @@ func (v View) Name() string {
 		return "Export"
 	case ViewHelp:
 		return "Help"
+	case ViewSettings:
+		return "Settings"
+	case ViewPermissions:
+		return "Permissions"
 	default:
 		return "Terminal"
 	}
@@ -253,6 +266,18 @@ type Snapshot struct {
 	// Light records which ground the interface is drawn on, so the menu can
 	// show the current choice as a tick rather than making the user remember.
 	Light bool
+
+	// Settings is the live configuration the Settings view edits, keyed by the
+	// same keys the config schema declares. The UI shows what the session read
+	// and asks the session to change it; it never writes the file itself.
+	Settings map[string]any
+
+	// Permissions is the measured capability report the Permissions view draws.
+	Permissions PermissionReport
+
+	// Palette is the active dark-ground preset name. It is shown in the top bar
+	// so the current look is never a guess.
+	Palette string
 }
 
 // Counts sums the changes of every finished run.
@@ -307,6 +332,10 @@ const (
 	ReqDiff
 	// ReqOpenPolicy asks the session to change the policy of the next sandbox.
 	ReqOpenPolicy
+	// ReqSetSetting changes one configuration value. The Settings view never
+	// writes the file itself: it validates, asks, and the session stores and
+	// applies the change so the running interface follows immediately.
+	ReqSetSetting
 )
 
 // Request is one instruction from the UI to the session.
@@ -322,6 +351,9 @@ type Request struct {
 	RunID  string
 	Entry  string
 	Choice PolicyChoice
+	// Key and Value carry a settings change.
+	Key   string
+	Value any
 }
 
 // RunRequest builds a run request.

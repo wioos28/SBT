@@ -283,6 +283,8 @@ func (a *App) apply(ev event, now time.Time) bool {
 	case evExit:
 		a.Emit(Request{Kind: ReqExit})
 		return true
+	case evSetSetting:
+		a.Emit(Request{Kind: ReqSetSetting, Key: ev.skey, Value: ev.sval})
 	case evSetDest:
 		a.State.Export.Destination = ev.dest
 		a.State.flash("export destination set", StateOK, now)

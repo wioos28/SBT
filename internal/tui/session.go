@@ -6,9 +6,11 @@ import (
 	"strings"
 	"time"
 
+	"github.com/wioos28/sbt/internal/config"
 	"github.com/wioos28/sbt/internal/journal"
 	"github.com/wioos28/sbt/internal/monitor"
 	"github.com/wioos28/sbt/internal/platform"
+	"github.com/wioos28/sbt/internal/security"
 	"github.com/wioos28/sbt/internal/shared/policy"
 )
 
@@ -44,13 +46,119 @@ type Session struct {
 
 	// host is the hostname shown in the top bar, resolved once.
 	host string
+
+	// settings is the live user configuration. The session owns it because the
+	// Settings view must never write the file itself: it validates, asks, and
+	// the session stores the change and applies it to the running interface.
+	settings *config.Settings
+	// perms is the measured capability report, refreshed with the probe.
+	perms security.CapabilityReport
 }
 
 // NewSession builds a session bound to an App. The probe is not run here:
 // callers decide when the host is inspected, because on some machines the probe
 // forks a helper and that must not happen on a hot path.
 func NewSession(app *App) *Session {
-	return &Session{App: app, preset: policy.Base(), host: hostname()}
+	cfg, err := config.Load()
+	if err != nil || cfg == nil {
+		cfg = config.DefaultSettings()
+	}
+	s := &Session{App: app, preset: policy.Base(), host: hostname(), settings: cfg}
+	s.applySettings()
+	return s
+}
+
+// SetSettings replaces the configuration store, used when a caller has already
+// loaded it and does not want the session reading the file again.
+func (s *Session) SetSettings(cfg *config.Settings) {
+	if cfg == nil {
+		return
+	}
+	s.settings = cfg
+	s.applySettings()
+}
+
+// settingBool reads a boolean preference with a fallback.
+func (s *Session) settingBool(key string, def bool) bool {
+	if s.settings == nil {
+		return def
+	}
+	if v, ok := s.settings.GetBool(key); ok {
+		return v
+	}
+	return def
+}
+
+// settingString reads a string preference with a fallback.
+func (s *Session) settingString(key, def string) string {
+	if s.settings == nil {
+		return def
+	}
+	if v, ok := s.settings.GetString(key); ok && v != "" {
+		return v
+	}
+	return def
+}
+
+// settingInt reads an int preference with a fallback.
+func (s *Session) settingInt(key string, def int) int {
+	if s.settings == nil {
+		return def
+	}
+	if v, ok := s.settings.GetInt(key); ok {
+		return v
+	}
+	return def
+}
+
+// applySettings pushes the current configuration into the running interface.
+//
+// This is what makes a settings edit land immediately rather than at the next
+// restart: the palette, the typing animation and the motion switch are all read
+// from here. It is safe to call repeatedly and touches no files.
+func (s *Session) applySettings() {
+	app := s.App
+	if app == nil {
+		return
+	}
+	app.Theme.SetPreset(s.settingString("ui.palette", "sbt"))
+	if s.settingString("ui.theme", "dark") == "light" {
+		app.Theme.SetLight(true)
+	}
+	colour, _ := ParseHex(s.settingString("anim.typing_color", "#00D9FF"))
+	app.State.Typing.Configure(
+		s.settingBool("anim.typing", true) && s.settingBool("ui.animations", true),
+		s.settingString("anim.typing_speed", "auto"),
+		s.settingInt("anim.typing_intensity", 70),
+		colour,
+	)
+	app.StartupAnim = s.settingBool("anim.startup", true) && s.settingBool("ui.animations", true)
+	app.ShowWelcome = s.settingBool("ui.welcome", true)
+	if app.Interp != nil {
+		app.Interp.Theme = app.Theme
+	}
+	app.Screen.SetTheme(app.Theme)
+	app.Screen.Invalidate()
+}
+
+// setSetting validates, stores and applies one configuration change.
+//
+// Validation happens here as well as in the view: the CLI can reach this path
+// too, and a bad value must never reach the file. A value that is refused is
+// reported to the user instead of being silently dropped.
+func (s *Session) setSetting(req Request, now time.Time) {
+	if s.settings == nil {
+		s.settings = config.DefaultSettings()
+	}
+	if err := s.settings.Set(req.Key, req.Value); err != nil {
+		s.App.State.Toasts.Notify(StateWarn, "setting not saved", err.Error(), now)
+		return
+	}
+	if err := s.settings.Save(); err != nil {
+		s.App.State.Toasts.Notify(StateDanger, "setting not saved", err.Error(), now)
+		return
+	}
+	s.applySettings()
 }
 
 // hostname is the short host label for the top bar. A name that cannot be read
@@ -94,7 +202,10 @@ func (s *Session) SetPreset(p policy.Preset) {
 // the report is re-read rather than cached for the life of the session: a host
 // can change (a namespace limit is lowered, a seccomp policy is denied) while
 // SBT is open, and a stale "protected" claim would be a lie.
-func (s *Session) Refresh() { s.caps = platform.Detect() }
+func (s *Session) Refresh() {
+	s.caps = platform.Detect()
+	s.perms = security.Permissions(s.caps)
+}
 
 // Caps returns the last platform probe report, or nil when the probe has not
 // run yet. A front end uses it to give a runner the same evidence the session
@@ -134,6 +245,11 @@ func (s *Session) snapshotInto(dst *Snapshot) {
 	}
 	// The cage verdict is derived from the probe, never assumed.
 	dst.Cage = cageVerdict(s.caps, s.preset)
+	dst.Permissions = permissionRows(s.perms)
+	if s.settings != nil {
+		dst.Settings = s.settings.GetAll()
+	}
+	dst.Palette = s.App.Theme.Preset
 
 	if s.sampler != nil {
 		// Sample never fails: a value it could not read comes back zero with
@@ -343,6 +459,8 @@ func (s *Session) Handle(ctx context.Context, req Request) {
 		s.diffRequest(req, now)
 	case ReqOpenPolicy:
 		s.SetPreset(policyFor(req.Choice))
+	case ReqSetSetting:
+		s.setSetting(req, time.Now())
 	case ReqResize, ReqExit:
 		// Handled by the loop: resize is observed by the screen, exit ends Run.
 	}
@@ -451,5 +569,23 @@ func (s *Session) Report() []string {
 		out = append(out, "  ! "+w)
 	}
 	out = append(out, "")
+	return out
+}
+
+// permissionRows converts the measured capability report into the rows the
+// Permissions view draws. Every row keeps its evidence and its least-privilege
+// remedy; a verdict the host could not measure stays UNKNOWN.
+func permissionRows(rep security.CapabilityReport) PermissionReport {
+	out := PermissionReport{At: rep.At}
+	for _, c := range rep.Caps {
+		out.Rows = append(out.Rows, PermissionRow{
+			Name:    c.Name,
+			Status:  string(c.Status),
+			State:   permissionState(string(c.Status)),
+			Reason:  c.Reason,
+			Feature: c.Feature,
+			Remedy:  c.Remedy,
+		})
+	}
 	return out
 }

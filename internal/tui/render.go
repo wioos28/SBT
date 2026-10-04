@@ -500,7 +500,7 @@ func (i *Interpreter) cageBadge(s *Snapshot) (string, RGB) {
 func (i *Interpreter) rail(b *Buffer, s *Snapshot, st *UIState, l layout) {
 	t := i.Theme
 	g := t.Glyphs()
-	views := []View{ViewTerminal, ViewFiles, ViewChanges, ViewStatus, ViewExport, ViewHelp}
+	views := Views()
 	y := l.Rail.Y
 	for _, row := range []string{"SBT", "SAFE", "TERM"} {
 		b.WriteClipped(l.Rail.X+1, y, l.Rail.X+l.Rail.W, row, Style{Fg: t.Palette.Yellow})
@@ -575,6 +575,10 @@ func (i *Interpreter) workspace(b *Buffer, s *Snapshot, st *UIState, r Rect) {
 		i.exportView(b, s, st, target)
 	case ViewHelp:
 		i.helpView(b, s, st, target)
+	case ViewSettings:
+		i.settingsView(b, s, st, target)
+	case ViewPermissions:
+		i.permissionsView(b, s, st, target)
 	default:
 		i.terminalView(b, s, st, target)
 	}
@@ -595,7 +599,7 @@ func (i *Interpreter) statusBar(b *Buffer, s *Snapshot, st *UIState, w, h int) {
 	col := 1
 	col = wrap(col, "f10 menu", Style{Fg: p.YellowHi})
 	col = wrap(col, "  ctrl+k commands", Style{Fg: p.Muted})
-	col = wrap(col, "  alt+1..6 views", Style{Fg: p.Muted})
+	col = wrap(col, "  "+helpViewKeys()+" views", Style{Fg: p.Muted})
 	if !anyConfirmOpen(st) {
 		col = wrap(col, "  ctrl+d exit", Style{Fg: p.Muted})
 	}

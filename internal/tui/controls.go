@@ -62,6 +62,9 @@ type event struct {
 	// runID and entry address one changed path for a diff request.
 	runID string
 	entry string
+	// skey and sval carry a settings change the view validated and wants stored.
+	skey string
+	sval any
 }
 
 type eventKind int
@@ -91,13 +94,15 @@ const (
 	evOpenPolicy
 	// evSetDest records a typed export destination.
 	evSetDest
+	// evSetSetting carries one validated settings change to the session.
+	evSetSetting
 )
 
 // wantsSession reports whether an event has to reach the session. Everything
 // else is presentational and stops at the UI.
 func (e event) wantsSession() bool {
 	switch e.kind {
-	case evRun, evStop, evSetPolicy, evExport, evDiscard, evExit, evRefresh, evDiff, evOpenPolicy:
+	case evRun, evStop, evSetPolicy, evExport, evDiscard, evExit, evRefresh, evDiff, evOpenPolicy, evSetSetting:
 		return true
 	}
 	return false
@@ -166,11 +171,11 @@ func (st *UIState) baseKey(k Key, snap *Snapshot) event {
 		}
 		st.Focus = focusInput
 		return event{kind: evNone}
-	case k.Alt && k.Type == KeyRune && k.Rune >= '1' && k.Rune <= '6':
+	case k.Alt && k.Type == KeyRune && k.Rune >= '1' && k.Rune <= '8':
 		st.SetView(View(k.Rune-'1'), snap.Now)
 		st.Focus = focusWorkspace
 		return event{kind: evNone}
-	case k.Ctrl && k.Type == KeyRune && k.Rune >= '1' && k.Rune <= '6':
+	case k.Ctrl && k.Type == KeyRune && k.Rune >= '1' && k.Rune <= '8':
 		st.SetView(View(k.Rune-'1'), snap.Now)
 		st.Focus = focusWorkspace
 		return event{kind: evNone}
@@ -188,6 +193,10 @@ func (st *UIState) baseKey(k Key, snap *Snapshot) event {
 		return event{kind: evNone}
 	case ViewExport:
 		return st.exportKey(k, snap)
+	case ViewSettings:
+		return st.settingsKey(k, snap)
+	case ViewPermissions:
+		return st.permissionsKey(k, snap)
 	}
 	return event{kind: evNone}
 }
