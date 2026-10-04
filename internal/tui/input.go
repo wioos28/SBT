@@ -150,6 +150,26 @@ func parseKey(seq []byte) (Key, int) {
 	case b == '\r' || b == '\n':
 		return Key{Type: KeyEnter}, 1
 	case b == '\t':
+		return Key{Type: KeyTab}, 1
+	case b == 127:
+		return Key{Type: KeyBackspace}, 1
+	case b == 0:
+		return Key{Type: KeyRune, Rune: ' ', Ctrl: true}, 1
+	case b < 27:
+		return Key{Type: KeyRune, Rune: rune('a' + b - 1), Ctrl: true}, 1
+	case b < 32:
+		return Key{}, 1
+	default:
+		r, size := utf8.DecodeRune(seq)
+		if r == utf8.RuneError && size <= 1 {
+			if len(seq) < utf8.UTFMax {
+				return Key{}, 0
+			}
+			return Key{}, 1
+		}
+		return Key{Type: KeyRune, Rune: r, Shift: isUpper(r)}, size
+	}
+}
 
 // parseCSI decodes an ESC [ ... sequence.
 func parseCSI(seq []byte) (Key, int) {
@@ -333,25 +353,3 @@ func atoiOK(s string) (int, bool) {
 }
 
 func isUpper(r rune) bool { return r >= 'A' && r <= 'Z' }
-
-		return Key{Type: KeyTab}, 1
-	case b == 127:
-		return Key{Type: KeyBackspace}, 1
-	case b == 0:
-		return Key{Type: KeyRune, Rune: ' ', Ctrl: true}, 1
-	case b < 27:
-		// Ctrl+A .. Ctrl+Z; Tab, Enter and Backspace were handled above.
-		return Key{Type: KeyRune, Rune: rune('a' + b - 1), Ctrl: true}, 1
-	case b < 32:
-		return Key{}, 1
-	default:
-		r, size := utf8.DecodeRune(seq)
-		if r == utf8.RuneError && size <= 1 {
-			if len(seq) < utf8.UTFMax {
-				return Key{}, 0 // a multi byte rune may still be arriving
-			}
-			return Key{}, 1
-		}
-		return Key{Type: KeyRune, Rune: r, Shift: isUpper(r)}, size
-	}
-}

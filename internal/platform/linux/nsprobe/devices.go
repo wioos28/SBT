@@ -8,6 +8,8 @@ import (
 	"path/filepath"
 	"syscall"
 	"time"
+
+	"github.com/wioos28/sbt/internal/version"
 )
 
 // dialOutside attempts a connection to a public address; it is expected to fail
@@ -53,7 +55,7 @@ func probeOverlay(root string) (Feature, bool) {
 	if err != nil {
 		return Feature{Level: Partial, Reason: "overlayfs mounted but writes failed: " + err.Error()}, true
 	}
-	return Feature{Level: Partial, Reason: "overlayfs available with a memory-backed upper; SBT v0.0.1 does not use it (see docs/LIMITATIONS.md)"}, true
+	return Feature{Level: Partial, Reason: "overlayfs available with a memory-backed upper; SBT v" + version.Version + " does not use it (see docs/LIMITATIONS.md)"}, true
 }
 
 func probeDevices(root string) Feature {

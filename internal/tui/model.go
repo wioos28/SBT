@@ -1,6 +1,8 @@
 package tui
 
 import (
+	"os"
+	"strings"
 	"time"
 
 	"github.com/wioos28/sbt/internal/journal"
@@ -8,6 +10,63 @@ import (
 	"github.com/wioos28/sbt/internal/shared/policy"
 	"github.com/wioos28/sbt/internal/shared/workspace"
 )
+
+// FileInfo is the UI-facing subset of journal.FileInfo used by export and file lists.
+type FileInfo = journal.FileInfo
+
+// PolicyChoice is the confirmation flow for policy changes.
+type PolicyChoice int
+
+const (
+	PolicyLow PolicyChoice = iota
+	PolicyHigh
+)
+
+// BootState tracks initial shell startup.
+type BootState struct {
+	Started time.Time
+	Done    bool
+}
+
+// Cage is the session state the status strip reports.
+type Cage struct {
+	State  CageState
+	Reason string
+}
+
+// modeWord is the trust level as the top bar shows it.
+func modeWord(m policy.Mode) string {
+	switch m {
+	case policy.High:
+		return "HIGH"
+	case policy.Low:
+		return "LOW"
+	default:
+		return "NORMAL"
+	}
+}
+
+func policyWord(m policy.Mode, p policy.Preset) string {
+	if p.Mode == policy.High || m == policy.High {
+		return "HIGH"
+	}
+	if p.Mode == policy.Low || m == policy.Low {
+		return "LOW"
+	}
+	return "NORMAL"
+}
+
+func fields(s string) []string { return strings.Fields(s) }
+
+func osGetenv(k string) string { return os.Getenv(k) }
+
+var HelpLines = []string{
+	"SBT cage help",
+	"  alt+1..5 changes view",
+	"  ctrl+k command palette",
+	"  ctrl+d exit / confirm",
+	"  use the status bar for the current sandbox verdict",
+}
 
 // View is one screen inside the workspace area.
 type View int
@@ -55,6 +114,7 @@ const (
 	StateOK
 	StateWarn
 	StateDanger
+	StateMeta
 )
 
 // Word is the severity as text.
@@ -123,11 +183,13 @@ type Snapshot struct {
 	Backend  string
 	Host     string
 	Kernel   string
+	OS       string
+	Arch     string
 
 	// Session policy and cage state.
 	Mode   policy.Mode
 	Policy policy.Preset
-	Cage   CageState
+	Cage   Cage
 
 	// Isolation evidence, straight from the platform probe.
 	Isolation []IsolationLine
@@ -196,6 +258,10 @@ const (
 	ReqExit
 	// ReqResize tells the session the terminal geometry changed.
 	ReqResize
+	// ReqRefresh asks the session to re-run the platform probe and re-sample
+	// the monitor, so the isolation report cannot go stale while the session
+	// is open.
+	ReqRefresh
 )
 
 // Request is one instruction from the UI to the session.

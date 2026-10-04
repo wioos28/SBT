@@ -1,6 +1,9 @@
 package tui
 
-import "strings"
+import (
+	"strings"
+	"time"
+)
 
 // Rect is a rectangle in cell coordinates. X, Y are inclusive, W, H are sizes.
 type Rect struct {
@@ -81,9 +84,9 @@ func (t *Theme) Chip(b *Buffer, x, y int, glyph, text string, col RGB, bold bool
 	if glyph == "" {
 		glyph = g.Dot
 	}
-	col = b.Write(x, y, glyph, Style{Fg: col, Bold: true})
-	col = b.Write(col, y, " "+text, Style{Fg: t.Palette.Text, Bold: bold})
-	return col
+	next := b.Write(x, y, glyph, Style{Fg: col, Bold: true})
+	next = b.Write(next, y, " "+text, Style{Fg: t.Palette.Text, Bold: bold})
+	return next
 }
 
 // Meter draws a labelled bar with its value, the shape used by the monitor and
@@ -116,6 +119,118 @@ func (t *Theme) Meter(b *Buffer, x, y, w int, label string, value, max float64, 
 	if suffix != "" {
 		b.WriteRight(x+w, y, suffix, Style{Fg: t.Palette.Text})
 	}
+}
+
+// SpinnerFrames are the frames of the indeterminate activity indicator.
+var SpinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+// ASCIISpinnerFrames is the fallback for terminals that cannot draw braille.
+var ASCIISpinnerFrames = []string{"|", "/", "-", "\\", "|", "/", "-", "\\"}
+
+// spinnerFrames picks the frame set matching the theme.
+func (t *Theme) spinnerFrames() []string {
+	if t != nil && t.ASCII {
+		return ASCIISpinnerFrames
+	}
+	return SpinnerFrames
+}
+
+// Spinner returns the current activity frame. With motion disabled it returns
+// the first frame: the indicator still appears, it simply does not move.
+func (t *Theme) Spinner(now, since time.Time) string {
+	frames := t.spinnerFrames()
+	if len(frames) == 0 {
+		return ""
+	}
+	if t != nil && !t.Motion {
+		return frames[0]
+	}
+	return frames[SpinnerFrame(now, since, len(frames))]
+}
+
+// AnimatedMeter draws a bar that eases toward its measured value instead of
+// snapping to it. A meter that jumps reads as a glitch; one that moves reads as
+// a measurement.
+//
+// Upward moves are eased so a burst of CPU is visible as it grows. Downward
+// moves are not eased: usage genuinely falling is news, and smoothing it would
+// delay it. The caller owns the eased value (see MeterEase) so this function
+// stays a pure draw.
+func (t *Theme) AnimatedMeter(b *Buffer, x, y, w int, label string, shown, target float64, col RGB, suffix string) {
+	t.Meter(b, x, y, w, label, shown, target, col, suffix)
+}
+
+// ProgressBar draws a labelled horizontal bar that fills over time, used for
+// the sandbox startup indicator. progress is 0..1.
+func (t *Theme) ProgressBar(b *Buffer, x, y, w int, label string, progress float64, col RGB) {
+	if w < 8 {
+		return
+	}
+	labelW := 0
+	if label != "" {
+		labelW = StringWidth(label) + 1
+	}
+	b.WriteClipped(x, y, x+labelW, label, Style{Fg: t.Palette.Muted})
+	barW := w - labelW - 2
+	if barW < 4 {
+		return
+	}
+	g := t.Glyphs()
+	if progress < 0 {
+		progress = 0
+	}
+	if progress > 1 {
+		progress = 1
+	}
+	filled := int(progress*float64(barW) + 0.5)
+	b.WriteClipped(x+labelW, y, x+labelW+barW,
+		strings.Repeat(g.BlockFull, filled)+strings.Repeat(g.BlockEmpty, barW-filled),
+		Style{Fg: col})
+}
+
+// PulseBar draws a bar whose fill sweeps back and forth, the still-motion
+// equivalent of ProgressBar for an indeterminate operation. It is what makes
+// "starting sandbox" read as in-progress instead of merely stated.
+func (t *Theme) PulseBar(b *Buffer, x, y, w int, now, since time.Time, col RGB) {
+	if w < 8 {
+		return
+	}
+	g := t.Glyphs()
+	b.Fill(x, y, w, 1, ' ', Style{Fg: t.Palette.Text})
+	pos := 0
+	if t != nil && t.Motion {
+		pos = Sweep(now, since, SweepPeriod, w)
+	}
+	// A short bright head with a dimmer trail: the tail is what communicates
+	// direction, so the bar looks like it is going somewhere.
+	head := min(pos, w-1)
+	b.Set(x+head, y, k(g.BlockFull), Style{Fg: Glow(col, 0.35), Bold: true})
+	for i := 1; i <= 6; i++ {
+		c := x + head - i
+		if c < x {
+			break
+		}
+		b.Set(c, y, k(g.BlockFull), Style{Fg: Mix(col, t.Palette.Bg, float64(i)/7.0)})
+	}
+}
+
+// Bar renders a meter whose fill is already computed, which is how the
+// renderer animates a value it is easing itself.
+func (t *Theme) Bar(b *Buffer, x, y, barW int, ratio float64, col RGB) {
+	if barW < 1 {
+		return
+	}
+	g := t.Glyphs()
+	if ratio < 0 {
+		ratio = 0
+	}
+	if ratio > 1 {
+		ratio = 1
+	}
+	filled := int(ratio*float64(barW) + 0.5)
+	b.WriteClipped(x, y, x+barW,
+		strings.Repeat(g.BlockFull, filled)+strings.Repeat(g.BlockEmpty, barW-filled),
+		Style{Fg: col})
 }
 
 // Spark draws a sparkline of normalised values.
@@ -154,10 +269,13 @@ func (t *Theme) KeyHints(b *Buffer, x, y, w int, hints [][2]string) {
 	col := x
 	for i, h := range hints {
 		if i > 0 {
-			col = b.WriteClipped(col, y, x+w, "  ", Style{Fg: t.Palette.Muted})
+			b.WriteClipped(col, y, x+w, "  ", Style{Fg: t.Palette.Muted})
+			col += 2
 		}
-		col = b.WriteClipped(col, y, x+w, h[0], Style{Fg: t.Palette.YellowHi, Bold: true})
-		col = b.WriteClipped(col, y, x+w, " "+h[1], Style{Fg: t.Palette.Muted})
+		b.WriteClipped(col, y, x+w, h[0], Style{Fg: t.Palette.YellowHi, Bold: true})
+		col += StringWidth(h[0])
+		b.WriteClipped(col, y, x+w, " "+h[1], Style{Fg: t.Palette.Muted})
+		col += StringWidth(" " + h[1])
 		if col >= x+w {
 			return
 		}

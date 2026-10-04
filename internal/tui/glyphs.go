@@ -30,7 +30,7 @@ var UnicodeGlyphs = Glyphs{
 	Bullet: "•", Caret: "▸", Pipe: "│",
 	BlockFull: "█", BlockEmpty: "░",
 	Spark: []string{"▁", "▂", "▃", "▄", "▅", "▆", "▇", "█"},
-	File: "·", Dir: "/", Exec: "*", Link: "@",
+	File:  "·", Dir: "/", Exec: "*", Link: "@",
 }
 
 // ASCIIGlyphs is the fallback used when the terminal cannot draw the Unicode
@@ -43,5 +43,5 @@ var ASCIIGlyphs = Glyphs{
 	Bullet: "*", Caret: ">", Pipe: "|",
 	BlockFull: "#", BlockEmpty: ".",
 	Spark: []string{".", ":", "-", "=", "+", "*", "#", "@"},
-	File: " ", Dir: "/", Exec: "*", Link: "@",
+	File:  " ", Dir: "/", Exec: "*", Link: "@",
 }

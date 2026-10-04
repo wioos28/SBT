@@ -1,10 +1,14 @@
 package tui
 
-// PaletteEntry is one command in the palette.
+import "strings"
+
+// PaletteEntry is one command in the palette. The command itself lives in
+// Command (see commands.go); this is only the row the overlay draws.
 type PaletteEntry struct {
 	Name   string
 	Hint   string
-	Run    func(*App)
+	Group  string
+	Action Action
 	Filter []string
 }
 
@@ -17,27 +21,22 @@ type PaletteState struct {
 
 // matches reports whether the entry survives the query filter.
 func (p *PaletteState) matches(e PaletteEntry) bool {
-	if p.Query == "" {
-		return true
-	}
-	if containsFold(e.Name, p.Query) {
-		return true
-	}
-	for _, kw := range e.Filter {
-		if containsFold(kw, p.Query) {
-			return true
-		}
-	}
-	return false
+	return commandMatches(Command{Title: e.Name, Filter: e.Filter}, p.Query)
 }
 
-// entries returns the filtered palette entries.
-func (p *PaletteState) entries(pal *Palette) []PaletteEntry {
-	out := []PaletteEntry{}
-	for _, e := range pal.entries() {
-		if p.matches(e) {
-			out = append(out, e)
-		}
+// entries returns the filtered palette entries. The registry comes from the UI
+// state, so the overlay never has to know where the commands were defined.
+func (p *PaletteState) entries(set CommandSet) []PaletteEntry {
+	cmds := set.Filter(p.Query)
+	out := make([]PaletteEntry, 0, len(cmds))
+	for _, c := range cmds {
+		out = append(out, PaletteEntry{
+			Name:   c.Title,
+			Hint:   c.Hint,
+			Group:  c.Group,
+			Action: c.Action,
+			Filter: c.Filter,
+		})
 	}
 	return out
 }
@@ -67,7 +66,7 @@ func (i *Interpreter) drawPalette(b *Buffer, s *Snapshot, st *UIState) {
 		return
 	}
 	b.WriteClipped(inner.X, inner.Y, inner.Right(), "find: "+st.Palette.Query, Style{Fg: p.Text, Bold: true})
-	entries := st.Palette.entries(i.Palette)
+	entries := st.Palette.entries(st.Commands)
 	rows := inner.H - 2
 	if rows <= 0 {
 		return

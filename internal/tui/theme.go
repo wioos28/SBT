@@ -27,6 +27,8 @@ func Hex(v uint32) RGB { return RGB{R: uint8(v >> 16), G: uint8(v >> 8), B: uint
 // Palette is the SBT colour set, exactly as specified for the product.
 type Palette struct {
 	Bg       RGB
+	BgTop    RGB
+	BgBottom RGB
 	Surface  RGB
 	Surface2 RGB
 	Yellow   RGB
@@ -34,13 +36,17 @@ type Palette struct {
 	Green    RGB
 	Red      RGB
 	Text     RGB
+	Fg       RGB
 	Muted    RGB
 	Border   RGB
+	Warning  RGB
 }
 
 // DefaultPalette is the SBT palette.
 var DefaultPalette = Palette{
 	Bg:       Hex(0x07090C),
+	BgTop:    Hex(0x0D1015),
+	BgBottom: Hex(0x0A0E13),
 	Surface:  Hex(0x0B0F14),
 	Surface2: Hex(0x10151B),
 	Yellow:   Hex(0xF5C518),
@@ -48,8 +54,10 @@ var DefaultPalette = Palette{
 	Green:    Hex(0x22C55E),
 	Red:      Hex(0xE53935),
 	Text:     Hex(0xE5E7EB),
+	Fg:       Hex(0xE5E7EB),
 	Muted:    Hex(0x7C8796),
 	Border:   Hex(0x242A33),
+	Warning:  Hex(0xF59E0B),
 }
 
 // ColorDepth is how much colour the terminal can take.
@@ -77,6 +85,9 @@ const (
 	CageLow
 	// CageHigh is a running sandbox whose policy the user relaxed.
 	CageHigh
+	// CageLimited and CageBroken are the explicit runtime warnings the UI renders.
+	CageLimited
+	CageBroken
 )
 
 // Label is the word shown next to the accent colour.
@@ -88,6 +99,10 @@ func (c CageState) Label() string {
 		return "LOW MODE"
 	case CageHigh:
 		return "HIGH RISK"
+	case CageLimited:
+		return "LIMITED"
+	case CageBroken:
+		return "BROKEN"
 	default:
 		return "NORMAL"
 	}
@@ -251,6 +266,10 @@ func (t *Theme) Accent(state CageState) RGB {
 	case CageLow:
 		return t.Palette.Yellow
 	case CageHigh:
+		return t.Palette.Red
+	case CageLimited:
+		return t.Palette.Yellow
+	case CageBroken:
 		return t.Palette.Red
 	default:
 		return t.Palette.Muted

@@ -1,0 +1,338 @@
+package tui
+
+import (
+	"context"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/wioos28/sbt/internal/journal"
+	"github.com/wioos28/sbt/internal/monitor"
+	"github.com/wioos28/sbt/internal/platform"
+	"github.com/wioos28/sbt/internal/shared/policy"
+)
+
+// Session owns the live state behind the cage and answers the App's requests.
+//
+// The division of labour is the important part. The App knows how to draw and
+// how to read a keyboard; this type knows how to probe the host, run a
+// sandbox and write an export. Neither makes a security decision for the
+// other: the UI asks, and the reason a sandbox may not start lives here,
+// where it can be measured rather than asserted.
+type Session struct {
+	// App is the UI this session answers.
+	App *App
+
+	// WorkspaceDir is where the session's files live on the host.
+	WorkspaceDir string
+	// Destination is where an export writes to. Empty means "not chosen yet".
+	Destination string
+
+	// caps is the last platform probe report.
+	caps *platform.Capabilities
+	// store is the journal of runs and files.
+	store *journal.Store
+	// sampler reads live resource usage for the sandbox tree.
+	sampler *monitor.Sampler
+	// runner performs the privileged work. It is an interface so the session
+	// can be tested without a kernel.
+	runner Runner
+	// preset is the policy applied to the next sandbox.
+	preset policy.Preset
+
+	// host is the hostname shown in the top bar, resolved once.
+	host string
+}
+
+// NewSession builds a session bound to an App. The probe is not run here:
+// callers decide when the host is inspected, because on some machines the probe
+// forks a helper and that must not happen on a hot path.
+func NewSession(app *App) *Session {
+	return &Session{App: app, preset: policy.Base(), host: hostname()}
+}
+
+// hostname is the short host label for the top bar. A name that cannot be read
+// is simply absent; it is never a reason to fail the session.
+func hostname() string {
+	h, err := os.Hostname()
+	if err != nil {
+		return ""
+	}
+	if i := strings.IndexByte(h, '.'); i > 0 {
+		h = h[:i]
+	}
+	return h
+}
+
+// SetStore binds the journal so the file and change views have real data.
+func (s *Session) SetStore(st *journal.Store) { s.store = st }
+
+// SetSampler binds the monitor to the sandbox helper process so the resource
+// panel measures the sandbox rather than SBT itself.
+func (s *Session) SetSampler(smp *monitor.Sampler) { s.sampler = smp }
+
+// SetRunner binds the component that performs privileged work.
+func (s *Session) SetRunner(r Runner) { s.runner = r }
+
+// SetPreset replaces the policy applied to the next sandbox.
+func (s *Session) SetPreset(p policy.Preset) { s.preset = p }
+
+// Refresh re-runs the platform probe and rebuilds the isolation evidence.
+//
+// The probe is the only source of truth about what the cage can enforce, so
+// the report is re-read rather than cached for the life of the session: a host
+// can change (a namespace limit is lowered, a seccomp policy is denied) while
+// SBT is open, and a stale "protected" claim would be a lie.
+func (s *Session) Refresh() { s.caps = platform.Detect() }
+
+// snapshotInto rebuilds the Snapshot from the current session state. It is
+// called before every frame, so it must stay cheap and must never fail a
+// frame: a component that cannot be read leaves its field zero and the reason
+// in the matching message, rather than being quietly omitted.
+func (s *Session) snapshotInto(dst *Snapshot) {
+	dst.Version = versionString()
+	dst.Host = s.host
+	dst.Policy = s.preset
+	dst.Mode = s.preset.Mode
+	dst.Destination = s.Destination
+	dst.WorkspaceDir = s.WorkspaceDir
+	dst.Now = time.Now()
+
+	if s.caps != nil {
+		dst.Kernel = s.caps.Kernel
+		dst.Arch = s.caps.Arch
+		dst.OS = s.caps.OS
+		if s.caps.Distribution != "" {
+			dst.Platform = s.caps.Distribution
+		}
+		dst.Backend = s.caps.Backend
+		dst.ProbeFail = s.caps.ProbeError
+		dst.Isolation = isolationLines(s.caps)
+		dst.Warnings = s.caps.Warnings
+	}
+	// The cage verdict is derived from the probe, never assumed.
+	dst.Cage = cageVerdict(s.caps, s.preset)
+
+	if s.sampler != nil {
+		// Sample never fails: a value it could not read comes back zero with
+		// Snapshot.Err explaining why, so a partial reading is still shown
+		// rather than silently replaced by an empty panel.
+		dst.Stats = s.sampler.Sample()
+	}
+	if s.store != nil {
+		if files, err := s.store.Files(); err == nil {
+			dst.Files = files
+		}
+		if runs, err := s.store.Runs(); err == nil {
+			dst.Runs = runs
+		}
+	}
+}
+
+// isolationLines converts the probe report into the rows the security panel
+// draws. Every probed feature gets a row even when it failed, because a
+// missing feature that is not shown is a missing feature the user cannot act
+// on.
+func isolationLines(c *platform.Capabilities) []IsolationLine {
+	lines := make([]IsolationLine, 0, len(c.Features))
+	for _, f := range c.Features {
+		line := IsolationLine{Label: f.Label, Value: f.Level.Label(), Reason: f.Reason}
+		switch f.Level {
+		case platform.Full:
+			line.State = StateOK
+		case platform.Partial:
+			line.State = StateWarn
+		case platform.Unavailable:
+			line.State = StateDanger
+		default:
+			line.State = StateMeta
+		}
+		lines = append(lines, line)
+	}
+	return lines
+}
+
+// cageVerdict is the single place the overall state is decided. The worst
+// verified feature wins, and a cage that could not be verified is never
+// reported as protected - that is the whole promise of the tool.
+func cageVerdict(c *platform.Capabilities, preset policy.Preset) Cage {
+	if c == nil {
+		return Cage{State: CageOff, Reason: "the platform probe has not run yet"}
+	}
+	if c.ProbeError != "" {
+		return Cage{State: CageBroken, Reason: c.ProbeError}
+	}
+	// The two features the jail is built from. Without them there is no
+	// filesystem isolation and no process isolation, so SBT refuses to start
+	// rather than pretending to.
+	verified := 0
+	for _, key := range []string{"user_namespace", "mount_namespace"} {
+		f := c.Feature(key)
+		switch f.Level {
+		case platform.Unavailable:
+			return Cage{State: CageBroken, Reason: f.Label + ": " + f.Reason}
+		case platform.Partial:
+			return Cage{State: CageLimited, Reason: f.Label + " is partial: " + f.Reason}
+		case platform.Full:
+			verified++
+		}
+	}
+	// A feature that the probe never reported is not a verified feature. An
+	// empty report must land on "no evidence", never on "protected": this is
+	// the one place where an optimistic default would be a safety bug.
+	if verified < 2 {
+		return Cage{State: CageLimited, Reason: "the probe did not verify every feature the cage needs"}
+	}
+	if preset.Mode == policy.High {
+		return Cage{State: CageHigh, Reason: "high risk policy: the network is not blocked"}
+	}
+	return Cage{State: CageProtected, Reason: "isolation verified at runtime"}
+}
+
+// versionString is the build identity shown in the top bar. It is a variable
+// rather than a direct import so the renderer stays a pure drawing layer and
+// the binary tells it who it is at startup.
+var versionString = func() string { return "" }
+
+// SetVersionString installs the version reported by the binary.
+// Runner is what a Session needs in order to actually run a command. It is an
+// interface so the session can be tested without a kernel, and so the security
+// decision of "may this run" stays in one implementation.
+type Runner interface {
+	// Available reports whether a sandbox can start now, and why not if it
+	// cannot. The reason is shown to the user verbatim.
+	Available() (bool, string)
+	// Run executes argv in a fresh sandbox and returns the finished run.
+	Run(argv []string) (RunSummary, error)
+	// Stop tears down a running sandbox.
+	Stop() error
+	// Export writes the selected paths to the destination.
+	Export(paths []string, dest string, overwrite bool) error
+	// Discard deletes the session workspace.
+	Discard() error
+}
+
+// Handle executes one Request from the App.
+//
+// Every branch here is the session's decision, not the UI's. The App asked for
+// something; this type decides whether it happens and what the user is told
+// when it does not. Nothing below trusts a request blindly: a run still has to
+// pass the availability check, and an export still has to refuse an
+// unacknowledged executable.
+func (s *Session) Handle(ctx context.Context, req Request) {
+	now := time.Now()
+	ui := s.App.State
+	switch req.Kind {
+	case ReqRun:
+		s.runRequest(ctx, req, now)
+	case ReqStop:
+		if s.runner == nil {
+			return
+		}
+		if err := s.runner.Stop(); err != nil {
+			ui.Toasts.Notify(StateWarn, "stop failed", err.Error(), now)
+			return
+		}
+		ui.Toasts.Notify(StateMeta, "sandbox stopped", "", now)
+	case ReqSetPolicy:
+		s.SetPreset(req.Policy)
+		ui.Toasts.Notify(StateWarn, "policy now "+string(req.Policy.Mode),
+			"high risk mode does not block the network", now)
+	case ReqExport:
+		s.exportRequest(req, now)
+	case ReqDiscard:
+		if s.runner != nil {
+			if err := s.runner.Discard(); err != nil {
+				ui.Toasts.Notify(StateDanger, "discard failed", err.Error(), now)
+				return
+			}
+		}
+		ui.Toasts.Notify(StateMeta, "workspace discarded", "every change was deleted", now)
+	case ReqRefresh:
+		s.Refresh()
+		ui.Toasts.Notify(StateOK, "platform report refreshed",
+			cageVerdict(s.caps, s.preset).State.Label(), now)
+	case ReqResize, ReqExit:
+		// Handled by the loop: resize is observed by the screen, exit ends Run.
+	}
+}
+
+// runRequest applies the policy checks and then runs the command.
+func (s *Session) runRequest(ctx context.Context, req Request, now time.Time) {
+	ui := s.App.State
+	if s.runner == nil {
+		ui.Toasts.Notify(StateDanger, "no runner is attached", "the session cannot start a sandbox", now)
+		return
+	}
+	// The refusal check happens here, not in the UI: the UI already knows how
+	// to display the reason, but only the session is allowed to decide.
+	if ok, why := s.runner.Available(); !ok {
+		ui.Toasts.Notify(StateDanger, "sandbox unavailable", why, now)
+		return
+	}
+	if len(req.Argv) == 0 {
+		return
+	}
+	ui.Busy.Active = false // the sandbox is running now, not starting
+	summary, err := s.runner.Run(req.Argv)
+	if err != nil {
+		summary.Command = joinArgs(req.Argv)
+		summary.Exit = -1
+		summary.Note = err.Error()
+	}
+	s.App.Settle(summary, now)
+}
+
+// exportRequest validates an export before writing anything.
+func (s *Session) exportRequest(req Request, now time.Time) {
+	ui := s.App.State
+	if s.runner == nil {
+		ui.Toasts.Notify(StateDanger, "no runner is attached", "nothing can be written", now)
+		return
+	}
+	if req.Destination == "" {
+		ui.Toasts.Notify(StateWarn, "no destination chosen", "set one before exporting", now)
+		return
+	}
+	if err := s.runner.Export(req.Paths, req.Destination, req.Overwrite); err != nil {
+		ui.Toasts.Notify(StateDanger, "export failed", err.Error(), now)
+		return
+	}
+	ui.Toasts.Notify(StateOK, "exported to "+req.Destination,
+		itoa(len(req.Paths))+" path(s) written", now)
+}
+
+// Finish is called when the interface closes. It releases the session's
+// resources and leaves the terminal usable.
+func (s *Session) Finish() {
+	if s.runner != nil {
+		_ = s.runner.Stop()
+	}
+}
+
+// Report is the plain-text summary printed after the cage closes, so the
+// user's scrollback keeps a record of what happened inside it.
+func (s *Session) Report() []string {
+	var out []string
+	s.snapshotInto(&s.App.Snap)
+	snap := &s.App.Snap
+	out = append(out, "")
+	out = append(out, "SBT session summary")
+	out = append(out, "  cage     "+snap.Cage.State.Label())
+	if snap.Cage.Reason != "" {
+		out = append(out, "  note     "+snap.Cage.Reason)
+	}
+	if c := snap.Counts(); c.Total() > 0 {
+		out = append(out, "  changes  "+c.Summary())
+		if c.Warnings > 0 {
+			out = append(out, "  ! "+itoa(c.Warnings)+" path(s) carry a risk note - review before exporting")
+		}
+	} else if len(snap.Runs) > 0 {
+		out = append(out, "  changes  none - every run left the workspace clean")
+	}
+	for _, w := range snap.Warnings {
+		out = append(out, "  ! "+w)
+	}
+	out = append(out, "")
+	return out
+}

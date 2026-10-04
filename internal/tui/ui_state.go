@@ -187,6 +187,38 @@ func (s ExportSel) clampScroll(n, rows int) int {
 	return s.Scroll
 }
 
+// paths is the set of selected indices, honouring "all" mode.
+func (s *ExportSel) paths() []int {
+	out := []int{}
+	if s.All {
+		for i := range s.Warn {
+			out = append(out, i)
+		}
+		for i := range s.Selected {
+			if !s.Warn[i] {
+				out = append(out, i)
+			}
+		}
+		return out
+	}
+	for i := range s.Selected {
+		out = append(out, i)
+	}
+	return out
+}
+
+// executableCount is how many selected paths are executables, which is what
+// the confirmation dialog has to disclose.
+func (s *ExportSel) executableCount() int {
+	n := 0
+	for _, i := range s.paths() {
+		if s.Warn[i] {
+			n++
+		}
+	}
+	return n
+}
+
 // ConfirmKind is what a confirmation dialog is about. Every destructive action
 // in SBT passes through one of these.
 type ConfirmKind int
@@ -216,9 +248,9 @@ type Confirm struct {
 type UIState struct {
 	Width, Height int
 
-	View View
-	Focus Focus
-	List ListState
+	View       View
+	Focus      Focus
+	List       ListState
 	ListScroll int
 
 	Input      string
@@ -231,8 +263,34 @@ type UIState struct {
 	Flash     Flash
 	LastKeyAt time.Time
 
-	Motion  bool // motion allowed (SBT_NO_MOTION / NO_MOTION respected)
+	// Motion is whether animation is allowed. It is decided once at startup
+	// from SBT_NO_MOTION / NO_MOTION and can be toggled from the palette, so a
+	// user who finds the movement uncomfortable can turn it off mid-session
+	// without restarting.
+	Motion  bool
 	InitRun bool // init animation has not been shown yet
+
+	// Toasts is the notice stack drawn in the corner of the cage.
+	Toasts Toasts
+	// Transition carries the incoming view so it can ease in.
+	Transition ViewTransition
+	// Busy is the indeterminate progress shown while the session works.
+	Busy Busy
+	// Commands is the palette registry this state filters.
+	Commands CommandSet
+	// Meters are the animated gauges carried between frames.
+	Meters Meters
+	// Quit records that the session asked to close.
+	Quit bool
+}
+
+// SetView switches the workspace view and starts the fade-in for it.
+func (st *UIState) SetView(v View, now time.Time) {
+	if st.View == v && st.Transition.At.IsZero() {
+		return
+	}
+	st.Transition = ViewTransition{From: st.View, To: v, At: now}
+	st.View = v
 }
 
 // max returns the larger of two ints.
@@ -242,4 +300,3 @@ func max(a, b int) int {
 	}
 	return b
 }
-

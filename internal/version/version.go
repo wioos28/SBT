@@ -4,7 +4,7 @@ package version
 // These values are overridable at build time with -ldflags.
 var (
 	// Version is the semantic version of this SBT build.
-	Version = "0.0.1"
+	Version = "0.0.2"
 	// Commit is the git revision the binary was built from.
 	Commit = "dev"
 	// Date is the build date (RFC3339) if provided by the build system.

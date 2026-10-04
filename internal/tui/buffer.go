@@ -52,6 +52,20 @@ func (b *Buffer) Resize(w, h int) {
 	b.Clear()
 }
 
+// CopyFrom replaces the buffer's content with another's, reallocating when the
+// geometry differs. The screen uses it to adopt a freshly rendered frame
+// without exposing its internal buffer to the views.
+func (b *Buffer) CopyFrom(o *Buffer) {
+	if o == nil {
+		b.Clear()
+		return
+	}
+	if b.W != o.W || b.H != o.H {
+		b.Resize(o.W, o.H)
+	}
+	copy(b.Cells, o.Cells)
+}
+
 // In reports whether a coordinate is inside the buffer.
 func (b *Buffer) In(x, y int) bool { return x >= 0 && y >= 0 && x < b.W && y < b.H }
 
