@@ -263,6 +263,24 @@ func securityCmd(args []string) int {
 		fmt.Println("Issues: 0 CRITICAL · 0 DANGER · 1 WARNING · 2 NOTICE")
 		return 0
 	}
+	if len(args) > 0 && args[0] == "permissions" {
+		// The same report the Permissions view draws, for when there is no
+		// terminal to draw it in.
+		rep := security.Permissions(platform.Detect())
+		fmt.Println("PERMISSIONS")
+		for _, c := range rep.Caps {
+			fmt.Printf("%-20s %-9s %s\n", c.Name, string(c.Status), c.Reason)
+			if c.Feature != "" {
+				fmt.Printf("%-20s %-9s needs: %s\n", "", "", c.Feature)
+			}
+			if c.Remedy != "" {
+				fmt.Printf("%-20s %-9s least privilege: %s\n", "", "", c.Remedy)
+			}
+		}
+		allowed, limited, denied := rep.Summary()
+		fmt.Printf("\n%d allowed  %d limited  %d denied\n", allowed, limited, denied)
+		return 0
+	}
 	if len(args) > 0 && args[0] == "scan" {
 		fmt.Println("TEST 01 filesystem isolation     PASS")
 		fmt.Println("TEST 02 process isolation        PASS")
@@ -281,6 +299,6 @@ func securityCmd(args []string) int {
 		fmt.Println("12:31:20 CRITICAL isolation verification failed")
 		return 0
 	}
-	fmt.Println("usage: sbt security [status | scan | test | logs]")
+	fmt.Println("usage: sbt security [status | permissions | scan | test | logs]")
 	return 2
 }
