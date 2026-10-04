@@ -770,6 +770,10 @@ func (i *Interpreter) terminalView(b *Buffer, s *Snapshot, st *UIState, r Rect) 
 	}
 	inputH := 3
 	listH := r.H - inputH
+	st.Files.Shown = isTrue(s.Settings["ui.files_row"])
+	if st.Files.Shown {
+		listH--
+	}
 	inner := t.Panel(b, r.X, r.Y, r.W, listH, header, "", p.Border,
 		st.View == ViewTerminal && st.Focus == focusWorkspace)
 	if inner.Empty() {
@@ -793,6 +797,9 @@ func (i *Interpreter) terminalView(b *Buffer, s *Snapshot, st *UIState, r Rect) 
 		} else {
 			b.WriteClipped(inner.X, inner.Y+j, inner.Right(), ln.Text, sty)
 		}
+	}
+	if st.Files.Shown {
+		i.filesStrip(b, s, st, Rect{X: r.X, Y: r.Bottom() - inputH - 1, W: r.W, H: 1})
 	}
 	ip := t.Panel(b, r.X, r.Bottom()-inputH, r.W, inputH, "command", "",
 		p.Border, st.View == ViewTerminal && st.Focus == focusInput)
@@ -1185,4 +1192,44 @@ func (i *Interpreter) emptyState(b *Buffer, r Rect, title, hint string) {
 	t := i.Theme
 	b.WriteClipped(r.X, r.Y+r.H/2-1, r.Right(), title, Style{Fg: t.Palette.Text, Bold: true})
 	b.WriteClipped(r.X, r.Y+r.H/2, r.Right(), hint, Style{Fg: t.Palette.Muted})
+}
+
+// filesStrip draws the one-line file activity row under the terminal.
+//
+// It is one row on purpose: the point is to keep recently touched paths in
+// view, not to become a second file browser. The selected path is highlighted
+// and marked, because a strip where you cannot tell where the cursor is is
+// decoration rather than navigation.
+func (i *Interpreter) filesStrip(b *Buffer, s *Snapshot, st *UIState, r Rect) {
+	t := i.Theme
+	p := t.Palette
+	g := t.Glyphs()
+	if r.Empty() {
+		return
+	}
+	b.Fill(r.X, r.Y, r.W, 1, ' ', Style{Fg: p.Text})
+	col := b.Write(r.X, r.Y, "FILES:", Style{Fg: p.Muted})
+	if len(s.Files) == 0 {
+		b.WriteClipped(col+1, r.Y, r.Right(), "  no active files", Style{Fg: p.Muted})
+		return
+	}
+	st.Files.Clamp(len(s.Files))
+	sep := "  |  "
+	for j, f := range s.Files {
+		name := f.Path
+		sty := Style{Fg: p.Muted}
+		if j == st.Files.Index {
+			sty = Style{Fg: p.Primary, Bold: true}
+			name = g.Caret + name
+		}
+		next := col + StringWidth(sep)
+		if next+StringWidth(name) > r.Right()-12 {
+			b.WriteRight(r.Right(), r.Y, "more "+itoa(len(s.Files)-j), Style{Fg: p.Muted})
+			break
+		}
+		b.Write(col, r.Y, sep, Style{Fg: p.Border})
+		b.WriteClipped(col+StringWidth(sep), r.Y, r.Right(), name, sty)
+		col += StringWidth(sep) + StringWidth(name)
+	}
+	b.WriteRight(r.Right(), r.Y, "left/right  enter opens", Style{Fg: p.Muted})
 }
