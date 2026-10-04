@@ -35,6 +35,9 @@ const (
 	CatSecurity      = "Security"
 	CatLanguage      = "Language"
 	CatAppearance    = "Appearance"
+	CatColors        = "Colors"
+	CatAnimations    = "Animations"
+	CatTroll         = "Troll"
 	CatLAN           = "LAN"
 	CatNotifications = "Notifications"
 )
@@ -59,8 +62,28 @@ var Schema = []Definition{
 
 	{Key: "ui.show_prefix", Category: CatAppearance, Kind: KindBool, Default: true, Help: "prefix command output with SBT>"},
 	{Key: "ui.theme", Category: CatAppearance, Kind: KindString, Default: "dark", Help: "colour theme: dark, light or plain"},
+	{Key: "ui.palette", Category: CatAppearance, Kind: KindString, Default: "sbt", Help: "palette preset: sbt, cyber, minimal, ocean, mono"},
 	{Key: "ui.compact", Category: CatAppearance, Kind: KindBool, Default: false, Help: "compact layout"},
 	{Key: "ui.animations", Category: CatAppearance, Kind: KindBool, Default: true, Help: "progress animations"},
+	{Key: "ui.welcome", Category: CatAppearance, Kind: KindBool, Default: true, Help: "show the welcome screen after startup"},
+	{Key: "ui.files_row", Category: CatAppearance, Kind: KindBool, Default: true, Help: "show the file row under the terminal"},
+
+	{Key: "color.primary", Category: CatColors, Kind: KindString, Default: "#FF8A00", Help: "primary (brand) colour, HEX"},
+	{Key: "color.accent", Category: CatColors, Kind: KindString, Default: "#00D9FF", Help: "accent colour for focus and typing, HEX"},
+	{Key: "color.info", Category: CatColors, Kind: KindString, Default: "#00D9FF", Help: "informational / sweep colour, HEX"},
+
+	{Key: "anim.startup", Category: CatAnimations, Kind: KindBool, Default: true, Help: "startup and loading animation"},
+	{Key: "anim.typing", Category: CatAnimations, Kind: KindBool, Default: true, Help: "typing sweep on the command input"},
+	{Key: "anim.typing_speed", Category: CatAnimations, Kind: KindString, Default: "auto", Help: "typing animation speed: auto, slow, normal, fast"},
+	{Key: "anim.typing_intensity", Category: CatAnimations, Kind: KindInt, Default: 70, Help: "typing sweep intensity, 0-100"},
+	{Key: "anim.typing_color", Category: CatAnimations, Kind: KindString, Default: "#00D9FF", Help: "typing sweep colour, HEX"},
+	{Key: "anim.menu", Category: CatAnimations, Kind: KindBool, Default: true, Help: "menu and view transitions"},
+	{Key: "anim.glow", Category: CatAnimations, Kind: KindBool, Default: true, Help: "glow on live elements"},
+	{Key: "anim.warnings", Category: CatAnimations, Kind: KindBool, Default: true, Help: "warning and critical alert animation"},
+
+	{Key: "troll.enabled", Category: CatTroll, Kind: KindBool, Default: false, Help: "harmless cosmetic jokes (never touches security UI)"},
+	{Key: "troll.frequency", Category: CatTroll, Kind: KindInt, Default: 15, Help: "how often a troll message appears, 0-100"},
+	{Key: "troll.intensity", Category: CatTroll, Kind: KindInt, Default: 30, Help: "troll message boldness, 0-100"},
 
 	{Key: "language.locale", Category: CatLanguage, Kind: KindString, Default: "en-US", Help: "active interface language"},
 
@@ -84,7 +107,7 @@ func SchemaKey(key string) (Definition, bool) {
 
 // Categories returns the declared categories in display order.
 func Categories() []string {
-	return []string{CatGeneral, CatAI, CatCLI, CatSecurity, CatLanguage, CatAppearance, CatLAN, CatNotifications}
+	return []string{CatGeneral, CatAI, CatCLI, CatSecurity, CatLanguage, CatAppearance, CatColors, CatAnimations, CatTroll, CatLAN, CatNotifications}
 }
 
 // ByCategory returns the definitions of one category.
@@ -145,3 +168,38 @@ func Coerce(key, raw string) (any, error) {
 type UnknownKeyError struct{ Key string }
 
 func (e *UnknownKeyError) Error() string { return "unknown setting " + e.Key }
+
+// IntRange is the inclusive valid range for an int setting. A zero Max means the
+// key is not range checked; it is returned for the Settings UI so it can refuse
+// an out-of-range value before it is stored.
+func IntRange(key string) (min, max int, ok bool) {
+	switch key {
+	case "anim.typing_intensity", "troll.frequency", "troll.intensity":
+		return 0, 100, true
+	case "lan.port":
+		return 1, 65535, true
+	case "general.default_memory":
+		return 16, 1 << 20, true
+	}
+	return 0, 0, false
+}
+
+// ChoiceValues lists the allowed values of a choice setting, or nil when the key
+// is free-form text. The Settings UI cycles through these with the arrow keys.
+func ChoiceValues(key string) []string {
+	switch key {
+	case "ui.theme":
+		return []string{"dark", "light", "plain"}
+	case "ui.palette":
+		return []string{"sbt", "cyber", "minimal", "ocean", "mono"}
+	case "anim.typing_speed":
+		return []string{"auto", "slow", "normal", "fast"}
+	case "general.default_network":
+		return []string{"off", "on"}
+	case "notifications.minimum_level":
+		return []string{"info", "notice", "warning", "danger", "critical"}
+	case "language.locale":
+		return []string{"en-US", "vi-VN", "ru-RU", "zh-CN"}
+	}
+	return nil
+}
