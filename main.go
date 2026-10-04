@@ -10,7 +10,6 @@ import (
 	"fmt"
 	"os"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/wioos28/sbt/internal/config"
@@ -61,27 +60,38 @@ func main() {
 		fmt.Println("\nTip: run `sbt doctor` to see what this machine can verify.")
 		return
 	}
+	os.Exit(dispatch(args))
+}
+
+// dispatch runs one CLI command and returns the process exit code.
+//
+// main only decides how to get here; every command, its argument handling and
+// its exit code live in dispatch, which is what lets the command line be tested
+// without starting a process.
+func dispatch(args []string) int {
 	switch args[0] {
 	case "doctor":
-		os.Exit(doctor())
+		return doctor()
 	case "setting":
-		os.Exit(setting(args[1:]))
+		return setting(args[1:])
 	case "language":
-		os.Exit(language(args[1:]))
+		return language(args[1:])
 	case "security":
-		os.Exit(securityCmd(args[1:]))
+		return securityCmd(args[1:])
 	case "shell", "repl":
 		// The line-oriented session, kept as an explicit choice: it is the
 		// fallback for a terminal the full-screen interface cannot drive, and
 		// the only mode that works over a serial line or a very small window.
-		os.Exit(shell.Run())
+		return shell.Run()
 	case "version", "--version", "-v":
 		fmt.Println(version.String())
+		return 0
 	case "help", "--help", "-h":
 		fmt.Println(usage)
+		return 0
 	default:
 		fmt.Fprintf(os.Stderr, "sbt: unknown command %q\n\n%s\n", args[0], usage)
-		os.Exit(2)
+		return 2
 	}
 }
 
@@ -156,7 +166,7 @@ func setting(args []string) int {
 		fmt.Fprintf(os.Stderr, "sbt setting: %v\n", err)
 		return 1
 	}
-	if len(args) == 0 {
+	if len(args) == 0 || (len(args) == 1 && args[0] == "list") {
 		fmt.Println("SBT settings")
 		keys := make([]string, 0, len(cfg.GetAll()))
 		for k := range cfg.GetAll() {
@@ -169,14 +179,16 @@ func setting(args []string) int {
 		return 0
 	}
 	if len(args) >= 3 && args[0] == "set" {
+		// The value goes through the schema, so a range or choice violation is
+		// refused here exactly as it is in the Settings view. Two code paths
+		// accepting different values is how a setting becomes a surprise.
 		value := strings.Join(args[2:], " ")
-		var setErr error
-		if args[2] == "true" || args[2] == "false" {
-			setErr = cfg.Set(args[1], strings.EqualFold(args[2], "true"))
-		} else if n, err := strconv.Atoi(args[2]); err == nil {
-			setErr = cfg.Set(args[1], n)
-		} else {
-			setErr = cfg.Set(args[1], value)
+		coerced, setErr := config.Coerce(args[1], args[2])
+		if setErr != nil && len(args) > 3 {
+			coerced, setErr = config.Coerce(args[1], value)
+		}
+		if setErr == nil {
+			setErr = cfg.Set(args[1], coerced)
 		}
 		if setErr != nil {
 			fmt.Fprintf(os.Stderr, "sbt setting set: %v\n", setErr)
@@ -281,16 +293,42 @@ func securityCmd(args []string) int {
 		fmt.Printf("\n%d allowed  %d limited  %d denied\n", allowed, limited, denied)
 		return 0
 	}
-	if len(args) > 0 && args[0] == "scan" {
-		fmt.Println("TEST 01 filesystem isolation     PASS")
-		fmt.Println("TEST 02 process isolation        PASS")
-		fmt.Println("TEST 03 network isolation        PASS")
-		fmt.Println("TEST 04 environment isolation    PASS")
-		fmt.Println("TEST 05 workspace boundary      PASS")
+	if len(args) > 0 && (args[0] == "scan" || args[0] == "test") {
+		// This used to print a fixed list of PASS lines. That was a lie: it
+		// reported verdicts for checks nobody had run. It now reports the
+		// capabilities that were actually measured, and says so when the host
+		// could not measure them rather than rounding up to a pass.
+		caps := platform.Detect()
+		rep := security.Permissions(caps)
+		fmt.Println("SECURITY SCAN")
+		verdict := func(status security.CapStatus) string {
+			switch status {
+			case security.CapAllowed:
+				return "PASS"
+			case security.CapLimited:
+				return "WARN"
+			case security.CapDenied:
+				return "FAIL"
+			default:
+				return "SKIP"
+			}
+		}
+		failed := 0
+		for i, c := range rep.Caps {
+			fmt.Printf("TEST %02d %-24s %-4s %s\n", i+1, c.Name, verdict(c.Status), c.Reason)
+			if c.Status == security.CapDenied {
+				failed++
+			}
+		}
+		if caps != nil && caps.OverallLevel() == platform.Unknown {
+			fmt.Println("\nnote: the platform probe could not be completed; isolation is unverified")
+		}
+		allowed, limited, denied := rep.Summary()
+		fmt.Printf("\n%d passed  %d limited  %d failed\n", allowed, limited, denied)
+		if failed > 0 {
+			return 1
+		}
 		return 0
-	}
-	if len(args) > 0 && args[0] == "test" {
-		return securityCmd([]string{"scan"})
 	}
 	if len(args) > 0 && args[0] == "logs" {
 		fmt.Println("12:31:02 INFO    sandbox started")

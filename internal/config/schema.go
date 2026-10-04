@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 )
@@ -158,8 +159,19 @@ func Coerce(key, raw string) (any, error) {
 		if err != nil {
 			return nil, err
 		}
+		if lo, hi, ranged := IntRange(key); ranged && (n < lo || n > hi) {
+			return nil, fmt.Errorf("%s must be between %d and %d", key, lo, hi)
+		}
 		return n, nil
 	default:
+		if choices := ChoiceValues(key); choices != nil {
+			for _, c := range choices {
+				if c == raw {
+					return raw, nil
+				}
+			}
+			return nil, fmt.Errorf("%s must be one of: %s", key, strings.Join(choices, " "))
+		}
 		return raw, nil
 	}
 }
