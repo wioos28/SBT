@@ -153,11 +153,14 @@ func (i *Interpreter) Render(s *Snapshot, st *UIState) *Buffer {
 func (i *Interpreter) menuBar(b *Buffer, s *Snapshot, st *UIState, w int) {
 	t := i.Theme
 	p := t.Palette
-	y := 1
+	y := menuBarY
 	b.Fill(0, y, w, 1, ' ', Style{Fg: p.Muted, Bg: p.BgTop, HasBg: true})
-	col := 1
 	for idx, m := range st.Menus.Menus {
 		label := " " + m.Title
+		// menuLabelX is the single answer to "where does this title start";
+		// the click handler uses the same one, so a click cannot land on the
+		// gap between two titles.
+		col := menuLabelX(st.Menus, idx)
 		if col+StringWidth(label) >= w-2 {
 			// The remaining menus do not fit. Saying so beats silently
 			// dropping half the bar with no indication that it exists.
@@ -170,7 +173,6 @@ func (i *Interpreter) menuBar(b *Buffer, s *Snapshot, st *UIState, w int) {
 			style = Style{Fg: p.Bg, Bg: p.Yellow, HasBg: true, Bold: true}
 		}
 		col = b.Write(col, y, label, style)
-		col++
 	}
 	// The one key that reaches the whole bar, restated where the user is
 	// already looking rather than only in the help view.
@@ -198,37 +200,18 @@ func (i *Interpreter) menuDropdown(b *Buffer, s *Snapshot, st *UIState, w int) {
 		return
 	}
 
-	// Find the title's column so the dropdown opens under it.
-	col := 1
-	for idx, m := range st.Menus.Menus {
-		if idx == st.Menu.Bar {
-			break
-		}
-		col += StringWidth(" "+m.Title) + 1
-	}
-
-	width := menuWidth(menu)
-	if col+width > w-1 {
-		// Shift left rather than shrink: a menu whose labels are truncated is
-		// a menu that hides its own dangerous rows.
-		col = max(w-1-width, 0)
-	}
-	if col < 0 {
-		col = 0
-	}
-	height := len(menu.Items) + 2
-	top := 2
-	if top+height > st.Height-1 {
-		height = st.Height - 1 - top
-	}
-	if height < 3 {
+	// The geometry comes from dropdownGeom, which the click handler also uses.
+	// Renderer and hit test sharing one function is what keeps a click on the
+	// third row from selecting the second.
+	g, ok := dropdownGeom(st, w)
+	if !ok {
 		return
 	}
-
 	// The bar row under the title is cleared so the dropdown has a solid
 	// background where it overlaps the menu strip.
-	b.Fill(col, 1, width, 1, ' ', Style{Fg: p.Muted, Bg: p.BgTop, HasBg: true})
-	inner := t.Panel(b, col, top, width, height, "", "", p.Yellow, true)
+	b.Fill(g.Inner.X-1, menuBarY, g.Inner.W+2, 1, ' ', Style{Fg: p.Muted, Bg: p.BgTop, HasBg: true})
+	inner := t.Panel(b, g.Inner.X-1, g.Inner.Y-1, g.Inner.W+2, g.Inner.H+2,
+		"", "", p.Yellow, true)
 	if inner.Empty() {
 		return
 	}
@@ -911,22 +894,10 @@ func (i *Interpreter) changesView(b *Buffer, s *Snapshot, st *UIState, r Rect) {
 		i.emptyState(b, inner, "no changes recorded", "the cage records what each run touches")
 		return
 	}
-	// The diff pane needs real room to be readable. Below the threshold it takes
-	// the whole panel rather than a useless sliver.
-	wide := inner.W >= 76 && st.DiffOpen
-	var listRect, diffRect Rect
-	if wide {
-		listW := inner.W / 3
-		if listW < 24 {
-			listW = 24
-		}
-		listRect = Rect{X: inner.X, Y: inner.Y, W: listW - 1, H: inner.H}
-		diffRect = Rect{X: listRect.Right(), Y: inner.Y, W: inner.W - listW + 1, H: inner.H}
-	} else if st.DiffOpen {
-		diffRect = inner
-	} else {
-		listRect = inner
-	}
+	// The split comes from changeRects, the same function the click handler
+	// resolves a click against. Guessing it here would put the cursor on the
+	// wrong path on the terminals where the split changes.
+	listRect, diffRect := st.changeRects(s)
 	if listRect.W > 0 {
 		i.changeList(b, s, st, rows, listRect)
 	}

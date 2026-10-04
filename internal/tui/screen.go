@@ -22,6 +22,7 @@ type Screen struct {
 	cur      *Buffer
 	w, h     int
 	started  bool
+	mouse    bool
 	suspend  int
 	lastDraw bytes.Buffer
 }
@@ -47,6 +48,15 @@ func (s *Screen) enter() error {
 	// 1049: alternate screen with a saved cursor; 25: hide cursor; 2026: make
 	// one redraw atomic so a slow terminal never shows a half drawn frame.
 	fmt.Fprint(s.out, "\x1b[?1049h\x1b[?25l\x1b[2J\x1b[H")
+	// Mouse tracking, enabled in one step:
+	//   1000 report button presses and releases
+	//   1002 also report motion while a button is held, so a drag can select
+	//   1006 SGR coordinates, which are not capped at 223 like the X10 form
+	//   1015 urxvt extended coordinates, for terminals that offer it
+	// Motion reporting is requested but the UI only acts on presses and wheel
+	// notches: a mouse move over a control must not be able to run anything.
+	fmt.Fprint(s.out, "\x1b[?1000h\x1b[?1002h\x1b[?1006h\x1b[?1015h")
+	s.mouse = true
 	s.started = true
 	return nil
 }
@@ -159,10 +169,27 @@ func (s *Screen) Suspend() {
 		return
 	}
 	s.suspend++
+	s.disableMouse()
 	fmt.Fprint(s.out, "\x1b[0m\x1b[?25h\x1b[?1049l")
 	if s.restore != nil {
 		s.restore()
 	}
+}
+
+// disableMouse turns mouse reporting off again.
+//
+// This has to happen on every path that gives the terminal back, including a
+// crash-free early exit: a terminal left reporting mouse events writes them
+// into the shell's own input, so the first click after quitting SBT would
+// arrive as escape sequences the shell tries to interpret.
+func (s *Screen) disableMouse() {
+	if !s.mouse {
+		return
+	}
+	s.mouse = false
+	// Disable the extended modes before the basic ones, so a terminal that
+	// tracks them separately ends with reporting fully off.
+	fmt.Fprint(s.out, "\x1b[?1015l\x1b[?1006l\x1b[?1002l\x1b[?1000l")
 }
 
 // Resume takes the terminal back after a child process has finished.
@@ -179,6 +206,10 @@ func (s *Screen) Resume() {
 		s.restore = restore
 	}
 	fmt.Fprint(s.out, "\x1b[?1049h\x1b[?25l\x1b[2J\x1b[H")
+	// Mouse reporting has to be asked for again: Suspend released the
+	// alternate screen, and a terminal does not remember the mode across it.
+	fmt.Fprint(s.out, "\x1b[?1000h\x1b[?1002h\x1b[?1006h\x1b[?1015h")
+	s.mouse = true
 	s.prev = nil
 }
 
@@ -195,6 +226,7 @@ func (s *Screen) Close() {
 		s.restore = nil
 	}
 	if s.started {
+		s.disableMouse()
 		fmt.Fprint(s.out, "\x1b[0m\x1b[?25h\x1b[?1049l")
 		s.started = false
 	}

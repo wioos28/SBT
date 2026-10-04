@@ -126,6 +126,13 @@ func (e event) wantsSession() bool {
 // mean "back out one step" rather than "whatever the bottom layer would do".
 func (st *UIState) handleKey(k Key, snap *Snapshot) event {
 	st.LastKeyAt = snap.Now
+	// A mouse report enters the same pipeline as a key press, so it inherits the
+	// overlay order below and every guard that order implies. Handling it here
+	// rather than in the App loop is what keeps a click from being a second,
+	// weaker path into the interface.
+	if k.Type == KeyMouse {
+		return st.handleMouse(k.Mouse, snap)
+	}
 	if st.Permission.Open {
 		return st.permissionKey(k, snap)
 	}

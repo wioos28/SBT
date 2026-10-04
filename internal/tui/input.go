@@ -1,6 +1,7 @@
 package tui
 
 import (
+	"strings"
 	"time"
 	"unicode/utf8"
 )
@@ -32,6 +33,10 @@ const (
 	KeyF5
 	KeyF6
 	KeyF10
+	// KeyMouse carries a decoded mouse report in Mouse. It is one key type
+	// rather than three so the reader stays a single stream of events and the
+	// App loop keeps one wakeup path.
+	KeyMouse
 )
 
 // Key is one decoded key press.
@@ -41,6 +46,8 @@ type Key struct {
 	Ctrl  bool
 	Alt   bool
 	Shift bool
+	// Mouse is meaningful only when Type is KeyMouse.
+	Mouse Mouse
 }
 
 // name is the short identifier of a key type, used by Name and the bindings.
@@ -90,6 +97,8 @@ func (t KeyType) name() string {
 		return "f6"
 	case KeyF10:
 		return "f10"
+	case KeyMouse:
+		return "mouse"
 	default:
 		return "?"
 	}
@@ -218,9 +227,103 @@ func csiFinal(final byte, params string, consumed int) (Key, int) {
 		return Key{Type: t, Ctrl: ctrl, Alt: alt}, consumed
 	case '~':
 		return parseTilde(params, consumed)
+	case 'M', 'm':
+		// A mouse report shares the CSI shape; the leading "<" is what tells
+		// it apart from a cursor key. 'm' is the release form.
+		return parseSGRMouse(params, final == 'm', consumed)
 	default:
 		return Key{}, consumed
 	}
+}
+
+// Mouse is one decoded mouse event, in the same coordinate space as Buffer:
+// X and Y are zero-based cell offsets, the origin at the top left.
+type Mouse struct {
+	// Button is the physical button or wheel notch.
+	Button MouseButton
+	// X and Y are the cell the pointer was at when the event happened.
+	X, Y int
+	// Ctrl, Alt and Shift are the modifier keys held during the event.
+	Ctrl, Alt, Shift bool
+	// Press reports a press or a release. Selection follows the press, so a
+	// release is ignored; it is kept because the terminal reports both and a
+	// drag needs the distinction.
+	Press bool
+}
+
+// MouseButton identifies what produced a mouse event.
+type MouseButton int
+
+// The buttons and wheel notches SBT reacts to.
+const (
+	MouseNone MouseButton = iota
+	MouseLeft
+	MouseMiddle
+	MouseRight
+	MouseWheelUp
+	MouseWheelDown
+)
+
+// parseSGRMouse decodes the SGR (mode 1006) mouse report, the form every current
+// terminal sends: ESC [ < button ; column ; row (M for press, m for release).
+//
+// The older X10 form is deliberately not decoded. It caps coordinates at 223,
+// which silently mis-targets clicks in the bottom right of a large terminal,
+// and it cannot be disambiguated from a key press by looking at the bytes. A
+// terminal that only speaks X10 therefore gets no click support rather than
+// clicks that land on the wrong cell - the same fail-closed rule the rest of
+// SBT follows.
+func parseSGRMouse(params string, release bool, consumed int) (Key, int) {
+	if !strings.HasPrefix(params, "<") {
+		return Key{}, consumed
+	}
+	fields := splitParams(params[1:])
+	if len(fields) != 3 {
+		// A truncated report is not an event; dropping it keeps the reader
+		// aligned on the next real key.
+		return Key{}, consumed
+	}
+	code, ok := atoiOK(fields[0])
+	if !ok {
+		return Key{}, consumed
+	}
+	col, ok1 := atoiOK(fields[1])
+	row, ok2 := atoiOK(fields[2])
+	if !ok1 || !ok2 {
+		return Key{}, consumed
+	}
+	btn := MouseNone
+	switch code & 3 {
+	case 0:
+		btn = MouseLeft
+	case 1:
+		btn = MouseMiddle
+	case 2:
+		btn = MouseRight
+	}
+	// The wheel is reported above the button bits and the modifier bits, so a
+	// wheel notch survives a Ctrl+wheel report. Wheel down is 65 rather than
+	// 128: the two directions are consecutive, not a bit apart, so the button
+	// bits below the wheel bit are what tell them apart.
+	switch {
+	case code&64 != 0:
+		btn = MouseWheelUp
+		if code&3 != 0 {
+			btn = MouseWheelDown
+		}
+	case code&128 != 0:
+		btn = MouseWheelDown
+	}
+	// Coordinates are one-based on the wire and zero-based in the buffer.
+	return Key{Type: KeyMouse, Mouse: Mouse{
+		Button: btn,
+		X:      max(col-1, 0),
+		Y:      max(row-1, 0),
+		Ctrl:   code&16 != 0,
+		Alt:    code&8 != 0,
+		Shift:  code&4 != 0,
+		Press:  !release,
+	}}, consumed
 }
 
 // parseTilde decodes the ESC [ <n> ~ family, including the modifyOtherKeys form

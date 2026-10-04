@@ -74,6 +74,10 @@ states what the cage enforces right now.
 | `esc` | close the overlay, or go back |
 | `ctrl+.` | stop the running sandbox |
 | `ctrl+d` | leave — always asks first |
+| mouse | click a menu title or a row, click a file or change, wheel to scroll |
+
+The interface is fully usable from the keyboard alone. Every mouse action has a
+key binding, and none of them is reachable only by pointing at it.
 
 Commands can also be typed into the input line, so the common actions are
 reachable by name as well as by key:
@@ -170,6 +174,26 @@ about what it cannot prove, overstating that would be the worst possible claim.
 The menu bar carries **Session · View · Security · Workspace · Look · Help**.
 Every row goes through the same action dispatcher the palette and the key
 bindings use, so the three ways of doing a thing can never disagree.
+
+**Mouse**
+
+The cage can be driven with the pointer as well as the keyboard. Clicking a menu
+title opens it, clicking a row runs exactly what `enter` on that row would, and
+the wheel scrolls the list views and an open diff. Clicking a file or a change
+selects it; clicking the already selected change opens its diff, so reviewing one
+is a single click.
+
+The mouse is never a shortcut past a guard. It reaches the same confirmation
+dialog, with the same two buttons, as the keyboard; the typed destroy phrase has
+no button at all, because a click cannot be a phrase. Every hit test resolves
+against the same geometry the renderer draws with, so a click cannot land on a
+different row than the one under the pointer.
+
+Mouse reporting is requested in SGR mode (`1006`), whose coordinates are not
+capped the way the legacy X10 form's are. A terminal that only speaks X10 gets no
+click support rather than clicks that silently land on the wrong cell. Terminals
+without mouse reporting are unaffected: the interface stays fully usable from the
+keyboard.
 
 ## Platform support
 
