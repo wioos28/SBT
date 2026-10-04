@@ -97,6 +97,9 @@ const (
 	evSetDest
 	// evSetSetting carries one validated settings change to the session.
 	evSetSetting
+	// evDestroy is the sandbox wipe. It is only ever raised after the user typed
+	// the exact phrase, so no key combination can reach it by accident.
+	evDestroy
 )
 
 // wantsSession reports whether an event has to reach the session. Everything
@@ -614,6 +617,8 @@ func (st *UIState) runAction(a Action, snap *Snapshot) event {
 		} else {
 			st.flash("animation off", StateOK, snap.Now)
 		}
+	case ActDestroy:
+		return st.askDestroy(snap)
 	case ActToggleTheme:
 		// The state records the choice; the App applies it to the live theme.
 		// Splitting it this way keeps the keyboard layer free of side effects
@@ -656,6 +661,9 @@ func (st *UIState) askHighRisk(snap *Snapshot) {
 // highlighted choice; escape always resolves to the safe side, so a user who
 // is unsure can never destroy anything by reflex.
 func (st *UIState) confirmKey(k Key, snap *Snapshot) event {
+	if st.Confirm.RequirePhrase != "" {
+		return st.confirmPhraseKey(k, snap)
+	}
 	if k.Type == KeyEsc || k.Type == KeyBackTab {
 		st.Confirm.Choice = 1
 		st.closeConfirm()
@@ -670,6 +678,67 @@ func (st *UIState) confirmKey(k Key, snap *Snapshot) event {
 	}
 	return event{kind: evNone}
 }
+
+// confirmPhraseKey drives the typed confirmation.
+//
+// The dangerous button is unreachable until the phrase matches exactly, and
+// escape always lands on the safe side. The dialog opens with Choice already
+// pointing at "keep", so a stray enter cannot destroy anything.
+func (st *UIState) confirmPhraseKey(k Key, snap *Snapshot) event {
+	switch k.Type {
+	case KeyEsc:
+		st.Confirm.Choice = 1
+		st.closeConfirm()
+		st.flash("cancelled - the sandbox was kept", StateMeta, snap.Now)
+		return event{kind: evNone}
+	case KeyBackspace:
+		if r := []rune(st.Confirm.Phrase); len(r) > 0 {
+			st.Confirm.Phrase = string(r[:len(r)-1])
+		}
+		return event{kind: evNone}
+	case KeyEnter:
+		if !st.confirmPhraseMatches() {
+			st.flash("type the exact phrase to continue", StateWarn, snap.Now)
+			return event{kind: evNone}
+		}
+		st.Confirm.Choice = 0
+		return st.acceptConfirm(snap)
+	}
+	if k.Type == KeyRune && !k.Ctrl && !k.Alt {
+		st.Confirm.Phrase += string(k.Rune)
+	}
+	return event{kind: evNone}
+}
+
+// confirmPhraseMatches reports whether the typed phrase is the exact one.
+func (st *UIState) confirmPhraseMatches() bool {
+	return st.Confirm.Phrase == st.Confirm.RequirePhrase && st.Confirm.RequirePhrase != ""
+}
+
+// askDestroy opens the destroy dialog. The safe side is preselected and the
+// dangerous side is locked behind the phrase, so the destructive outcome can
+// never be reached by pressing enter.
+func (st *UIState) askDestroy(snap *Snapshot) event {
+	body := []string{
+		"SBT detected a critical condition.",
+		"Destroying stops the sandbox and deletes the session workspace.",
+		"Any change not exported first is lost.",
+	}
+	if c := snap.Counts(); c.Total() > 0 {
+		body = append(body, "! "+c.Summary()+" not yet exported")
+	}
+	st.Confirm = Confirm{
+		Kind:          ConfirmDestroy,
+		Title:         "CRITICAL SECURITY EVENT",
+		Body:          body,
+		Choice:        1,
+		RequirePhrase: DestroyPhrase,
+	}
+	return event{kind: evNone}
+}
+
+// DestroyPhrase is the exact text that unlocks the destructive button.
+const DestroyPhrase = "DESTROY SBT SANDBOX"
 
 // acceptConfirm resolves the dialog into the event it was opened for. Only the
 // dangerous choice (Choice 0) produces a destructive event.
@@ -700,6 +769,8 @@ func (st *UIState) acceptConfirm(snap *Snapshot) event {
 		return event{kind: evExport, paths: paths, dest: st.Export.Destination, overwrite: st.Export.ExeAck}
 	case ConfirmPolicy:
 		return event{kind: evSetPolicy, preset: c.Policy}
+	case ConfirmDestroy:
+		return event{kind: evDestroy}
 	}
 	return event{kind: evNone}
 }
@@ -933,6 +1004,8 @@ func (st *UIState) slashCommand(text string, snap *Snapshot) event {
 			return event{kind: evNone}
 		}
 		return event{kind: evSetSetting, skey: "language.locale", sval: args[0]}
+	case "destroy", "wipe":
+		return st.askDestroy(snap)
 	case "exit", "quit":
 		return st.askExit(snap)
 	}

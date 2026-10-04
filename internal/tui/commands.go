@@ -52,6 +52,9 @@ const (
 	ActBack
 	// ActToggleTheme swaps between the white and the dark ground.
 	ActToggleTheme
+	// ActDestroy opens the typed confirmation for the sandbox wipe. It is a
+	// distinct action because reaching it must always go through the phrase.
+	ActDestroy
 )
 
 // Action is what a command asks the session to do.
@@ -203,6 +206,8 @@ func DefaultCommands() CommandSet {
 			Filter: []string{"light", "dark", "white", "colours"}},
 		{Title: "dismiss warnings", Hint: "", Group: "view", Action: Action{Kind: ActDismissWarnings},
 			Filter: []string{"clear", "toast", "notice"}},
+		{Title: "destroy sandbox", Hint: "", Group: "danger", Action: Action{Kind: ActDestroy},
+			Filter: []string{"wipe", "delete", "reset", "critical"}},
 		{Title: "exit", Hint: "ctrl+d", Group: "danger", Action: Action{Kind: ActExit},
 			Filter: []string{"quit", "leave", "bye"}},
 	}}

@@ -332,6 +332,9 @@ const (
 	ReqDiff
 	// ReqOpenPolicy asks the session to change the policy of the next sandbox.
 	ReqOpenPolicy
+	// ReqDestroy is the explicit sandbox destruction. The session only ever
+	// receives it after the user typed the exact confirmation phrase.
+	ReqDestroy
 	// ReqSetSetting changes one configuration value. The Settings view never
 	// writes the file itself: it validates, asks, and the session stores and
 	// applies the change so the running interface follows immediately.

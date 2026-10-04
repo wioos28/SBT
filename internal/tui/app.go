@@ -283,6 +283,9 @@ func (a *App) apply(ev event, now time.Time) bool {
 	case evExit:
 		a.Emit(Request{Kind: ReqExit})
 		return true
+	case evDestroy:
+		a.State.flash("destroying the sandbox…", StateWarn, now)
+		a.Emit(Request{Kind: ReqDestroy})
 	case evSetSetting:
 		a.Emit(Request{Kind: ReqSetSetting, Key: ev.skey, Value: ev.sval})
 	case evSetDest:

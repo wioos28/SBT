@@ -459,6 +459,8 @@ func (s *Session) Handle(ctx context.Context, req Request) {
 		s.diffRequest(req, now)
 	case ReqOpenPolicy:
 		s.SetPreset(policyFor(req.Choice))
+	case ReqDestroy:
+		s.destroyRequest(time.Now())
 	case ReqSetSetting:
 		s.setSetting(req, time.Now())
 	case ReqResize, ReqExit:
@@ -588,4 +590,38 @@ func permissionRows(rep security.CapabilityReport) PermissionReport {
 		})
 	}
 	return out
+}
+
+// destroyRequest tears the sandbox down and removes the session workspace.
+//
+// This is the only irreversible action in SBT, and it runs only after the user
+// typed the exact confirmation phrase. The wording of the notice matters: SBT
+// unlinks the workspace and stops the helper, but a filesystem journal may
+// still hold blocks it cannot reach, so the notice says "removed" and not
+// "securely erased". Overstating the guarantee here would be the worst possible
+// lie for a tool whose job is to be honest about what it cannot prove.
+func (s *Session) destroyRequest(now time.Time) {
+	ui := s.App.State
+	dir := s.WorkspaceDir
+	if s.runner != nil {
+		if err := s.runner.Stop(); err != nil {
+			ui.Toasts.Notify(StateWarn, "sandbox stop reported a problem", err.Error(), now)
+		}
+	}
+	removed := ""
+	if s.store != nil {
+		if err := s.store.Remove(); err != nil {
+			ui.Toasts.Notify(StateWarn, "workspace removed with a problem",
+				dir+" : "+err.Error(), now)
+		} else {
+			removed = dir
+		}
+	} else {
+		removed = "the session workspace (nothing to remove)"
+	}
+	s.WorkspaceDir = ""
+	detail := "the sandbox was stopped and " + removed + " was unlinked."
+	detail += " Files were removed by an ordinary unlink: the filesystem may still hold copies in its journal."
+	ui.Toasts.Notify(StateWarn, "sandbox destroyed", detail, now)
+	ui.flash("sandbox destroyed", StateWarn, now)
 }

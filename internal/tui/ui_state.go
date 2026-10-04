@@ -375,6 +375,9 @@ const (
 	ConfirmExport
 	ConfirmDiscard
 	ConfirmExit
+	// ConfirmDestroy is the sandbox wipe. It is the only dialog that can require
+	// a typed phrase before the dangerous button becomes reachable.
+	ConfirmDestroy
 )
 
 // Confirm is a pending yes/no dialog.
@@ -385,6 +388,14 @@ type Confirm struct {
 	Choice int // 0 = the dangerous action, 1 = the safe action
 	Policy PolicyChoice
 	Export bool // the export dialog carries executable warnings
+
+	// RequirePhrase is the exact text the user must type before the dangerous
+	// button can be chosen. It is empty for every dialog but the destroy one.
+	RequirePhrase string
+	// Phrase is what the user has typed so far. It is compared literally - this
+	// is a deliberate-action guard, not a secret, so a timing-safe comparison
+	// would buy nothing here.
+	Phrase string
 }
 
 // UIState is everything the interface remembers between frames. It is plain

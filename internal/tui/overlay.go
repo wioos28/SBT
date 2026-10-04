@@ -142,6 +142,10 @@ func (i *Interpreter) drawConfirm(b *Buffer, st *UIState) {
 		}
 		b.WriteClipped(inner.X, inner.Y+j, inner.Right(), ln, sty)
 	}
+	if st.Confirm.RequirePhrase != "" {
+		i.drawPhraseConfirm(b, st)
+		return
+	}
 	strip, left, right := confirmButtons()
 	b.WriteClipped(inner.X, inner.Bottom()-1, inner.Right(), strip, Style{Fg: p.Muted})
 	col := left
@@ -155,4 +159,59 @@ func (i *Interpreter) drawConfirm(b *Buffer, st *UIState) {
 		choice = "stay safe"
 	}
 	b.WriteClipped(inner.X+col, inner.Bottom()-1, inner.Right(), choice, style)
+}
+
+// destroyPrompt is the one line that says what must be typed.
+func (st *UIState) destroyPrompt() string {
+	return "type  " + st.Confirm.RequirePhrase + "  to unlock destroy"
+}
+
+// drawPhraseConfirm draws the typed-confirmation dialog.
+//
+// The destructive button stays visibly locked until the phrase matches exactly,
+// so the state is legible before the user commits to anything. Pressing enter
+// with a wrong phrase does nothing except say why.
+func (i *Interpreter) drawPhraseConfirm(b *Buffer, st *UIState) {
+	t := i.Theme
+	p := t.Palette
+	w := 60
+	if st.Width-6 < w {
+		w = st.Width - 6
+	}
+	if w < 24 {
+		return
+	}
+	x := (st.Width - w) / 2
+	h := 6 + len(st.Confirm.Body) + 2
+	y := (st.Height - h) / 2
+	if y < 2 {
+		y = 2
+	}
+	inner := t.Panel(b, x, y, w, h, st.Confirm.Title, "esc = keep", p.Red, true)
+	if inner.Empty() {
+		return
+	}
+	for j, ln := range st.Confirm.Body {
+		if inner.Y+j >= inner.Bottom()-3 {
+			break
+		}
+		sty := Style{Fg: p.Text}
+		if strings.HasPrefix(ln, "!") {
+			sty = Style{Fg: p.Red, Bold: true}
+		}
+		b.WriteClipped(inner.X, inner.Y+j, inner.Right(), ln, sty)
+	}
+	py := inner.Bottom() - 2
+	prompt := st.Confirm.RequirePhrase + ": "
+	b.WriteClipped(inner.X, py, inner.Right(), prompt, Style{Fg: p.Muted})
+	b.WriteClipped(inner.X+StringWidth(prompt), py, inner.Right(), st.Confirm.Phrase,
+		Style{Fg: p.Text, Bold: true})
+	unlocked := st.Confirm.Phrase == st.Confirm.RequirePhrase && st.Confirm.RequirePhrase != ""
+	state := "locked  [ type the exact phrase ]"
+	stateSty := Style{Fg: p.Warning, Bold: true}
+	if unlocked {
+		state = "UNLOCKED  [ enter destroys the sandbox ]"
+		stateSty = Style{Fg: p.Red, Bold: true}
+	}
+	b.WriteClipped(inner.X, inner.Bottom()-1, inner.Right(), state, stateSty)
 }
