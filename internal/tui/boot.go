@@ -125,7 +125,7 @@ func (i *Interpreter) Boot(b *Buffer, boot *BootSequence, now time.Time) {
 	p := t.Palette
 	w, h := b.W, b.H
 	if w < 24 || h < 8 {
-		b.WriteClipped(0, 0, w, "SBT starting", Style{Fg: p.Primary, Bold: true})
+		b.WriteClipped(0, 0, w, tr("boot.starting", "SBT starting"), Style{Fg: p.Primary, Bold: true})
 		return
 	}
 	motion := t.Motion
@@ -241,7 +241,7 @@ func (i *Interpreter) Boot(b *Buffer, boot *BootSequence, now time.Time) {
 		b.WriteClipped(2, y+j, w-2, line, sty)
 	}
 	if boot.Phase == BootRunning && h > 2 {
-		b.WriteClipped(2, h-1, w-2, "any key skips", Style{Fg: p.Muted})
+		b.WriteClipped(2, h-1, w-2, tr("boot.anyKey", "any key skips"), Style{Fg: p.Muted})
 	}
 }
 

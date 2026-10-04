@@ -30,6 +30,9 @@ func NewBundle() *Bundle {
 	b := &Bundle{current: FallbackLocale, store: map[string]map[string]string{}}
 	for _, locale := range BuiltinLocales() {
 		b.LoadJSON(locale, defaultStrings(locale))
+		if extra := uiStrings(locale); extra != nil {
+			b.LoadJSON(locale, extra)
+		}
 	}
 	return b
 }

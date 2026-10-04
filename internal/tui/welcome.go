@@ -19,7 +19,7 @@ func (i *Interpreter) Welcome(b *Buffer, snap *Snapshot, st *UIState, now time.T
 	p := t.Palette
 	w, h := b.W, b.H
 	if w < 24 || h < 8 {
-		b.WriteClipped(0, 0, w, Wordmark+" - Secure Sandbox Terminal", Style{Fg: p.Primary, Bold: true})
+		b.WriteClipped(0, 0, w, Wordmark+" - "+tr("welcome.subtitle", "Secure Sandbox Terminal"), Style{Fg: p.Primary, Bold: true})
 		return
 	}
 	boxW := 52
@@ -76,8 +76,8 @@ func (i *Interpreter) Welcome(b *Buffer, snap *Snapshot, st *UIState, now time.T
 		b.WriteClipped(cx, cy, inner.Right(), text, sty)
 		cy++
 	}
-	center("Welcome to SBT", Style{Fg: p.Text, Bold: true})
-	center("Secure Sandbox Terminal", Style{Fg: p.Info})
+	center(tr("welcome.title", "Welcome to SBT"), Style{Fg: p.Text, Bold: true})
+	center(tr("welcome.subtitle", "Secure Sandbox Terminal"), Style{Fg: p.Info})
 	cy++
 
 	verdict := snap.Cage.State.Label()
@@ -97,7 +97,7 @@ func (i *Interpreter) Welcome(b *Buffer, snap *Snapshot, st *UIState, now time.T
 		line += hp[0] + " " + hp[1]
 	}
 	center(line, Style{Fg: p.Muted})
-	center("/help   /setting   /permissions   /status", Style{Fg: p.Muted})
+	center(tr("welcome.commands", "/help   /setting   /permissions   /status"), Style{Fg: p.Muted})
 	cy++
-	center("press any key to enter the terminal", Style{Fg: p.Secondary})
+	center(tr("welcome.enter", "press any key to enter the terminal"), Style{Fg: p.Secondary})
 }

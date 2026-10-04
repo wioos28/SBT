@@ -1030,7 +1030,7 @@ func (st *UIState) slashCommand(text string, snap *Snapshot) event {
 	case "exit", "quit":
 		return st.askExit(snap)
 	}
-	st.flash("unknown command /"+name+"  -  try /help", StateWarn, snap.Now)
+	st.flash(tr("slash.unknown", "unknown command")+" /"+name+"  -  "+tr("slash.help", "try /help"), StateWarn, snap.Now)
 	return event{kind: evNone}
 }
 

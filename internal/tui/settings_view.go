@@ -40,58 +40,62 @@ type settingSection struct {
 
 // openPermissions is the Permissions row: it switches view rather than storing
 // a value, which is why rows can be an action as well as a setting.
-var openPermissions = settingRow{Key: "@permissions", Label: "Open permissions centre", Kind: settingAction}
+var openPermissions = settingRow{
+	Key:   "@permissions",
+	Label: tr("settings.row.permissions", "Open permissions centre"),
+	Kind:  settingAction,
+}
 
 // settingSections is the Settings layout. The order is the order a user thinks
 // in: how it looks, what it says, how it moves, what it may do.
 var settingSections = []settingSection{
-	{Title: "Appearance", Rows: []settingRow{
-		{Key: "ui.palette", Label: "Palette preset", Kind: settingChoice},
-		{Key: "ui.theme", Label: "Ground", Kind: settingChoice},
-		{Key: "ui.welcome", Label: "Welcome screen", Kind: settingToggle},
-		{Key: "ui.files_row", Label: "File row", Kind: settingToggle},
-		{Key: "ui.compact", Label: "Compact layout", Kind: settingToggle},
+	{Title: tr("settings.section.appearance", "Appearance"), Rows: []settingRow{
+		{Key: "ui.palette", Label: tr("settings.row.palette", "Palette preset"), Kind: settingChoice},
+		{Key: "ui.theme", Label: tr("settings.row.theme", "Ground"), Kind: settingChoice},
+		{Key: "ui.welcome", Label: tr("settings.row.welcome", "Welcome screen"), Kind: settingToggle},
+		{Key: "ui.files_row", Label: tr("settings.row.filesRow", "File row"), Kind: settingToggle},
+		{Key: "ui.compact", Label: tr("settings.row.compact", "Compact layout"), Kind: settingToggle},
 	}},
-	{Title: "Colors", Rows: []settingRow{
-		{Key: "color.primary", Label: "Primary", Kind: settingText},
-		{Key: "color.accent", Label: "Accent", Kind: settingText},
-		{Key: "color.info", Label: "Info", Kind: settingText},
+	{Title: tr("settings.section.colors", "Colors"), Rows: []settingRow{
+		{Key: "color.primary", Label: tr("settings.row.colorPrimary", "Primary"), Kind: settingText},
+		{Key: "color.accent", Label: tr("settings.row.colorAccent", "Accent"), Kind: settingText},
+		{Key: "color.info", Label: tr("settings.row.colorInfo", "Info"), Kind: settingText},
 	}},
-	{Title: "Animations", Rows: []settingRow{
-		{Key: "anim.startup", Label: "Startup animation", Kind: settingToggle},
-		{Key: "anim.typing", Label: "Typing animation", Kind: settingToggle},
-		{Key: "anim.typing_speed", Label: "Typing speed", Kind: settingChoice},
-		{Key: "anim.typing_intensity", Label: "Sweep intensity", Kind: settingNumber},
-		{Key: "anim.typing_color", Label: "Sweep colour", Kind: settingText},
-		{Key: "anim.menu", Label: "Menu transitions", Kind: settingToggle},
-		{Key: "anim.glow", Label: "Glow", Kind: settingToggle},
-		{Key: "anim.warnings", Label: "Warning animation", Kind: settingToggle},
+	{Title: tr("settings.section.animations", "Animations"), Rows: []settingRow{
+		{Key: "anim.startup", Label: tr("settings.row.animStartup", "Startup animation"), Kind: settingToggle},
+		{Key: "anim.typing", Label: tr("settings.row.animTyping", "Typing animation"), Kind: settingToggle},
+		{Key: "anim.typing_speed", Label: tr("settings.row.animTypingSpeed", "Typing speed"), Kind: settingChoice},
+		{Key: "anim.typing_intensity", Label: tr("settings.row.animIntensity", "Sweep intensity"), Kind: settingNumber},
+		{Key: "anim.typing_color", Label: tr("settings.row.animTypingColor", "Sweep colour"), Kind: settingText},
+		{Key: "anim.menu", Label: tr("settings.row.animMenu", "Menu transitions"), Kind: settingToggle},
+		{Key: "anim.glow", Label: tr("settings.row.animGlow", "Glow"), Kind: settingToggle},
+		{Key: "anim.warnings", Label: tr("settings.row.animWarnings", "Warning animation"), Kind: settingToggle},
 	}},
-	{Title: "Terminal", Rows: []settingRow{
-		{Key: "general.default_memory", Label: "Memory limit (MB)", Kind: settingNumber},
-		{Key: "general.default_network", Label: "Network policy", Kind: settingChoice},
+	{Title: tr("settings.section.terminal", "Terminal"), Rows: []settingRow{
+		{Key: "general.default_memory", Label: tr("settings.row.memory", "Memory limit (MB)"), Kind: settingNumber},
+		{Key: "general.default_network", Label: tr("settings.row.network", "Network policy"), Kind: settingChoice},
 	}},
-	{Title: "Security", Rows: []settingRow{
-		{Key: "security.require_isolation", Label: "Require verified isolation", Kind: settingToggle},
-		{Key: "security.read_only_host", Label: "Read-only host trees", Kind: settingToggle},
-		{Key: "security.environment_isolation", Label: "Scrub environment", Kind: settingToggle},
-		{Key: "security.confirm_dangerous", Label: "Confirm dangerous actions", Kind: settingToggle},
+	{Title: tr("settings.section.security", "Security"), Rows: []settingRow{
+		{Key: "security.require_isolation", Label: tr("settings.row.requireIsolation", "Require verified isolation"), Kind: settingToggle},
+		{Key: "security.read_only_host", Label: tr("settings.row.readOnlyHost", "Read-only host trees"), Kind: settingToggle},
+		{Key: "security.environment_isolation", Label: tr("settings.row.envIsolation", "Scrub environment"), Kind: settingToggle},
+		{Key: "security.confirm_dangerous", Label: tr("settings.row.confirmDangerous", "Confirm dangerous actions"), Kind: settingToggle},
 		openPermissions,
 	}},
-	{Title: "Language", Rows: []settingRow{
-		{Key: "language.locale", Label: "Interface language", Kind: settingChoice},
+	{Title: tr("settings.section.language", "Language"), Rows: []settingRow{
+		{Key: "language.locale", Label: tr("settings.row.locale", "Interface language"), Kind: settingChoice},
 	}},
-	{Title: "Troll", Rows: []settingRow{
-		{Key: "troll.enabled", Label: "Fun messages", Kind: settingToggle},
-		{Key: "troll.frequency", Label: "Frequency (0-100)", Kind: settingNumber},
-		{Key: "troll.intensity", Label: "Intensity (0-100)", Kind: settingNumber},
+	{Title: tr("settings.section.troll", "Troll"), Rows: []settingRow{
+		{Key: "troll.enabled", Label: tr("settings.row.trollOn", "Fun messages"), Kind: settingToggle},
+		{Key: "troll.frequency", Label: tr("settings.row.trollFreq", "Frequency (0-100)"), Kind: settingNumber},
+		{Key: "troll.intensity", Label: tr("settings.row.trollIntensity", "Intensity (0-100)"), Kind: settingNumber},
 	}},
-	{Title: "Advanced", Rows: []settingRow{
-		{Key: "notifications.enabled", Label: "Notifications", Kind: settingToggle},
-		{Key: "notifications.minimum_level", Label: "Minimum level", Kind: settingChoice},
-		{Key: "lan.enabled", Label: "LAN panel", Kind: settingToggle},
-		{Key: "lan.port", Label: "LAN port", Kind: settingNumber},
-		{Key: "lan.authentication", Label: "LAN authentication", Kind: settingToggle},
+	{Title: tr("settings.section.advanced", "Advanced"), Rows: []settingRow{
+		{Key: "notifications.enabled", Label: tr("settings.row.notifyOn", "Notifications"), Kind: settingToggle},
+		{Key: "notifications.minimum_level", Label: tr("settings.row.notifyLevel", "Minimum level"), Kind: settingChoice},
+		{Key: "lan.enabled", Label: tr("settings.row.lanOn", "LAN panel"), Kind: settingToggle},
+		{Key: "lan.port", Label: tr("settings.row.lanPort", "LAN port"), Kind: settingNumber},
+		{Key: "lan.authentication", Label: tr("settings.row.lanAuth", "LAN authentication"), Kind: settingToggle},
 	}},
 }
 
@@ -138,10 +142,7 @@ func (ss *SettingsState) clamp() {
 func settingValueLabel(key string, raw any) string {
 	switch v := raw.(type) {
 	case bool:
-		if v {
-			return "ON"
-		}
-		return "OFF"
+		return trOnOff(v)
 	case int:
 		return itoa(v)
 	case int64:
@@ -312,12 +313,12 @@ func (st *UIState) settingsEditKey(k Key, snap *Snapshot) event {
 	case KeyEnter:
 		val, err := validateSetting(row.Key, ss.Draft)
 		if err != nil {
-			ss.Message = "not saved: " + err.Error()
+			ss.Message = tr("settings.notSaved", "not saved") + ": " + err.Error()
 			return event{kind: evNone}
 		}
 		ss.Editing = false
 		ss.Draft = ""
-		ss.Message = "saved"
+		ss.Message = tr("settings.saved", "saved")
 		return event{kind: evSetSetting, skey: row.Key, sval: val}
 	}
 	if k.Type == KeyRune && !k.Ctrl && !k.Alt {

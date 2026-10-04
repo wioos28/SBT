@@ -1235,7 +1235,7 @@ func (i *Interpreter) filesStrip(b *Buffer, s *Snapshot, st *UIState, r Rect) {
 	b.Fill(r.X, r.Y, r.W, 1, ' ', Style{Fg: p.Text})
 	col := b.Write(r.X, r.Y, "FILES:", Style{Fg: p.Muted})
 	if len(s.Files) == 0 {
-		b.WriteClipped(col+1, r.Y, r.Right(), "  no active files", Style{Fg: p.Muted})
+		b.WriteClipped(col+1, r.Y, r.Right(), "  "+tr("files.none", "no active files"), Style{Fg: p.Muted})
 		return
 	}
 	st.Files.Clamp(len(s.Files))
@@ -1256,5 +1256,5 @@ func (i *Interpreter) filesStrip(b *Buffer, s *Snapshot, st *UIState, r Rect) {
 		b.WriteClipped(col+StringWidth(sep), r.Y, r.Right(), name, sty)
 		col += StringWidth(sep) + StringWidth(name)
 	}
-	b.WriteRight(r.Right(), r.Y, "left/right  enter opens", Style{Fg: p.Muted})
+	b.WriteRight(r.Right(), r.Y, tr("files.hint", "left/right  enter opens"), Style{Fg: p.Muted})
 }

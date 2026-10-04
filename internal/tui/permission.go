@@ -23,10 +23,10 @@ const (
 
 // PermissionLabels are the four answers as the product specifies them.
 var PermissionLabels = [4]string{
-	"[ Allow once ]",
-	"[ Allow session ]",
-	"[ Configure ]",
-	"[ Cancel ]",
+	tr("permission.allowOnce", "[ Allow once ]"),
+	tr("permission.allowSess", "[ Allow session ]"),
+	tr("permission.configure", "[ Configure ]"),
+	tr("permission.cancel", "[ Cancel ]"),
 }
 
 // PermissionState is a pending PERMISSION REQUIRED dialog.
@@ -120,7 +120,7 @@ func (i *Interpreter) drawPermission(b *Buffer, st *UIState) {
 	if y < 1 {
 		y = 1
 	}
-	inner := t.Panel(b, x, y, w, h, "PERMISSION REQUIRED", "esc = cancel", pal.Warning, true)
+	inner := t.Panel(b, x, y, w, h, tr("permission.required", "PERMISSION REQUIRED"), tr("permission.esc", "esc = cancel"), pal.Warning, true)
 	if inner.Empty() {
 		return
 	}
@@ -130,15 +130,15 @@ func (i *Interpreter) drawPermission(b *Buffer, st *UIState) {
 		if y0+n >= inner.Bottom() {
 			return
 		}
-		b.WriteClipped(inner.X, y0+n, inner.Right(), Pad(label, 12), Style{Fg: pal.Muted})
-		b.WriteClipped(inner.X+12, y0+n, inner.Right(), value, sty)
+		b.WriteClipped(inner.X, y0+n, inner.Right(), Pad(label, 14), Style{Fg: pal.Muted})
+		b.WriteClipped(inner.X+14, y0+n, inner.Right(), value, sty)
 		n++
 	}
-	put("Capability", Truncate(p.Capability, inner.W-14), Style{Fg: pal.Text, Bold: true})
-	put("Reason", Truncate(p.Reason, inner.W-14), Style{Fg: pal.Text})
-	put("Risk", Truncate(p.Risk, inner.W-14), Style{Fg: pal.Warning})
+	put(tr("permission.capability", "Capability"), Truncate(p.Capability, inner.W-16), Style{Fg: pal.Text, Bold: true})
+	put(tr("permission.reason", "Reason"), Truncate(p.Reason, inner.W-16), Style{Fg: pal.Text})
+	put(tr("permission.risk", "Risk"), Truncate(p.Risk, inner.W-16), Style{Fg: pal.Warning})
 	if p.Detail != "" {
-		put("Evidence", Truncate(p.Detail, inner.W-14), Style{Fg: pal.Muted})
+		put(tr("permission.evidence", "Evidence"), Truncate(p.Detail, inner.W-16), Style{Fg: pal.Muted})
 	}
 	n++
 	for j, label := range PermissionLabels {

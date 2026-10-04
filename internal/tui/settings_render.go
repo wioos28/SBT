@@ -59,7 +59,7 @@ func (i *Interpreter) settingsView(b *Buffer, s *Snapshot, st *UIState, r Rect) 
 		}
 		value := ""
 		if row.Kind == settingAction {
-			value = "enter"
+			value = tr("settings.open", "enter")
 		} else {
 			value = settingValueLabel(row.Key, s.Settings[row.Key])
 		}
@@ -86,7 +86,7 @@ func (i *Interpreter) settingsView(b *Buffer, s *Snapshot, st *UIState, r Rect) 
 	hintY := body.Bottom() - 1
 	if hintY > 0 && hintY <= body.Bottom() {
 		b.WriteClipped(body.X, hintY, body.Right(),
-			"left/right section  up/down row  enter edit  esc back", Style{Fg: p.Muted})
+			tr("settings.hint.nav", "left/right section  up/down row  enter edit  esc back"), Style{Fg: p.Muted})
 	}
 }
 

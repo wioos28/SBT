@@ -68,12 +68,12 @@ func (i *Interpreter) permissionsView(b *Buffer, s *Snapshot, st *UIState, r Rec
 	rep := s.Permissions
 	allowed, limited, denied := rep.Counts()
 	right := itoa(allowed) + " ok  " + itoa(limited) + " limited  " + itoa(denied) + " denied"
-	inner := t.Panel(b, r.X, r.Y, r.W, r.H, "permissions", right, p.Border, st.View == ViewPermissions)
+	inner := t.Panel(b, r.X, r.Y, r.W, r.H, tr("perms.title", "permissions"), right, p.Border, st.View == ViewPermissions)
 	if inner.Empty() {
 		return
 	}
 	if len(rep.Rows) == 0 {
-		i.emptyState(b, inner, "no permission report yet", "the session measures the host at startup")
+		i.emptyState(b, inner, tr("perms.none", "no permission report yet"), tr("perms.hint", "the session measures the host at startup"))
 		return
 	}
 	y := inner.Y
@@ -103,11 +103,11 @@ func (i *Interpreter) permissionsView(b *Buffer, s *Snapshot, st *UIState, r Rec
 			y++
 		}
 		if row.Feature != "" && y < inner.Bottom() {
-			b.WriteClipped(inner.X+2, y, inner.Right(), "needs: "+row.Feature, Style{Fg: p.Muted})
+			b.WriteClipped(inner.X+2, y, inner.Right(), tr("perms.needs", "needs: ")+row.Feature, Style{Fg: p.Muted})
 			y++
 		}
 		if row.Remedy != "" && y < inner.Bottom() {
-			b.WriteClipped(inner.X+2, y, inner.Right(), "least privilege: "+row.Remedy, Style{Fg: p.Info})
+			b.WriteClipped(inner.X+2, y, inner.Right(), tr("perms.least", "least privilege: ")+row.Remedy, Style{Fg: p.Info})
 			y++
 		}
 		if y < inner.Bottom() {

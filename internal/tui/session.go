@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/wioos28/sbt/internal/config"
+	"github.com/wioos28/sbt/internal/i18n"
 	"github.com/wioos28/sbt/internal/journal"
 	"github.com/wioos28/sbt/internal/monitor"
 	"github.com/wioos28/sbt/internal/platform"
@@ -124,6 +125,12 @@ func (s *Session) applySettings() {
 	app := s.App
 	if app == nil {
 		return
+	}
+	if locale := s.settingString("language.locale", ""); locale != "" {
+		// A language change applies to the next frame, so switching does not
+		// need a restart and the interface re-renders in the new language
+		// immediately.
+		_ = i18n.Use(locale)
 	}
 	app.Theme.SetPreset(s.settingString("ui.palette", "sbt"))
 	if s.settingString("ui.theme", "dark") == "light" {
@@ -661,11 +668,11 @@ func (s *Session) updateAlert(dst *Snapshot, now time.Time) {
 		return
 	}
 	s.alertKey = key
-	title := "ISOLATION LIMITED"
-	body := []string{"some isolation could not be verified"}
+	title := tr("alert.isolationLimited", "ISOLATION LIMITED")
+	body := []string{tr("alert.partial", "some isolation could not be verified")}
 	if verdict == CageBroken {
-		title = "CAGE BROKEN"
-		body = []string{"dangerous execution is refused until isolation is verified"}
+		title = tr("alert.cageBroken", "CAGE BROKEN")
+		body = []string{tr("alert.refused", "dangerous execution is refused until isolation is verified")}
 	}
 	if dst.ProbeFail != "" {
 		body = append(body, dst.ProbeFail)
@@ -725,9 +732,9 @@ func (s *Session) repairCage(now time.Time) {
 	s.snapshotInto(&s.App.Snap)
 	verdict := s.App.Snap.Cage.State
 	if verdict == CageBroken || verdict == CageLimited {
-		ui.Toasts.Notify(StateDanger, "cage is still "+verdict.Label(),
+		ui.Toasts.Notify(StateDanger, tr("repair.stillBroken", "cage is still")+" "+verdict.Label(),
 			"the probe ran again and could not verify isolation: "+s.App.Snap.ProbeFail, now)
 		return
 	}
-	ui.Toasts.Notify(StateOK, "cage re-initialised", "probe re-ran: "+verdict.Label(), now)
+	ui.Toasts.Notify(StateOK, tr("repair.done", "cage re-initialised"), "probe re-ran: "+verdict.Label(), now)
 }
