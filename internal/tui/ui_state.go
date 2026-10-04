@@ -427,7 +427,12 @@ type UIState struct {
 	List       ListState
 	ListScroll int
 
-	Input      string
+	Input string
+	// Alert is the warning or critical banner. Both the session (a probe verdict)
+	// and the app (a finished run with warnings) may raise it; neither raises it
+	// decoratively.
+	Alert AlertState
+
 	Settings   SettingsState
 	Files      FilesRow
 	Typing     TypingState

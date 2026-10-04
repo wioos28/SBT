@@ -275,6 +275,11 @@ type Snapshot struct {
 	// Permissions is the measured capability report the Permissions view draws.
 	Permissions PermissionReport
 
+	// Confinement is the evidence panel shown while SBT has isolated a process
+	// or session. It is named apart from Isolation, which is the older list of
+	// what the probe enforces.
+	Confinement IsolationState
+
 	// Palette is the active dark-ground preset name. It is shown in the top bar
 	// so the current look is never a guess.
 	Palette string

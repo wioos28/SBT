@@ -53,6 +53,10 @@ type Session struct {
 	settings *config.Settings
 	// perms is the measured capability report, refreshed with the probe.
 	perms security.CapabilityReport
+	// alertKey remembers which cage verdict produced the current banner, so a
+	// verdict that repeats every frame does not restart its clock, and one that
+	// changes does.
+	alertKey string
 }
 
 // NewSession builds a session bound to an App. The probe is not run here:
@@ -245,6 +249,8 @@ func (s *Session) snapshotInto(dst *Snapshot) {
 	}
 	// The cage verdict is derived from the probe, never assumed.
 	dst.Cage = cageVerdict(s.caps, s.preset)
+	s.updateAlert(dst, dst.Now)
+	s.updateConfinement(dst)
 	dst.Permissions = permissionRows(s.perms)
 	if s.settings != nil {
 		dst.Settings = s.settings.GetAll()
@@ -624,4 +630,75 @@ func (s *Session) destroyRequest(now time.Time) {
 	detail += " Files were removed by an ordinary unlink: the filesystem may still hold copies in its journal."
 	ui.Toasts.Notify(StateWarn, "sandbox destroyed", detail, now)
 	ui.flash("sandbox destroyed", StateWarn, now)
+}
+
+// updateAlert raises or clears the warning banner from the cage verdict.
+//
+// The banner is derived from a real condition - a probe that could not verify
+// isolation - and it is keyed on the verdict so an unchanged verdict does not
+// restart the clock every frame. A broken cage holds the banner up as critical:
+// that condition is not something to let fade while the session is still open.
+func (s *Session) updateAlert(dst *Snapshot, now time.Time) {
+	ui := s.App.State
+	verdict := dst.Cage.State
+	if verdict != CageBroken && verdict != CageLimited {
+		s.alertKey = ""
+		ui.Alert = AlertState{}
+		return
+	}
+	key := verdict.Label() + "|" + dst.ProbeFail
+	if key == s.alertKey {
+		return
+	}
+	s.alertKey = key
+	title := "ISOLATION LIMITED"
+	body := []string{"some isolation could not be verified"}
+	if verdict == CageBroken {
+		title = "CAGE BROKEN"
+		body = []string{"dangerous execution is refused until isolation is verified"}
+	}
+	if dst.ProbeFail != "" {
+		body = append(body, dst.ProbeFail)
+	}
+	if dst.Cage.Reason != "" {
+		body = append(body, dst.Cage.Reason)
+	}
+	ui.Alert = AlertState{
+		Kind:     StateWarn,
+		Title:    title,
+		Body:     body,
+		Since:    now,
+		Critical: verdict == CageBroken,
+	}
+	if verdict == CageBroken {
+		ui.Alert.Kind = StateDanger
+	}
+}
+
+// updateConfinement fills the isolation evidence panel while a sandbox is
+// running. Everything in it comes from state the session measured: the sandbox
+// id, the command from the journal, and the policy that is actually in force.
+func (s *Session) updateConfinement(dst *Snapshot) {
+	if !dst.Sandbox.Running {
+		dst.Confinement = IsolationState{}
+		return
+	}
+	process := "sandbox"
+	if last, ok := dst.LatestRun(); ok && len(last.Command) > 0 {
+		process = strings.Join(last.Command, " ")
+	}
+	filesystem, network := "RESTRICTED", "BLOCKED"
+	if s.preset.Mode == policy.High {
+		filesystem, network = "RESTRICTED", "ALLOWED"
+	}
+	dst.Confinement = IsolationState{
+		Active:      true,
+		Process:     process,
+		PID:         dst.Sandbox.ID,
+		Reason:      policyWord(s.preset.Mode, s.preset) + " policy",
+		Filesystem:  filesystem,
+		Network:     network,
+		Permissions: "MAPPED USER  " + policyWord(s.preset.Mode, s.preset),
+		Since:       dst.Now,
+	}
 }

@@ -30,6 +30,10 @@ type layout struct {
 	Side    Rect // security/resources panel, right (absent on narrow terminals)
 	HasRail bool
 	HasSide bool
+	// HasAlert is true when the warning banner gets its own row, and AlertY is
+	// the row it occupies.
+	HasAlert bool
+	AlertY   int
 	// HasMenu is false when the terminal is too short to carry a menu bar. The
 	// menu is then reachable only through the command palette, which costs no
 	// vertical space.
@@ -44,7 +48,7 @@ const railWidth = 18
 // The menu bar takes a row off the top of the body. It is only reserved when
 // the terminal can spare one: a three-row-tall terminal showing an empty menu
 // strip and no content is strictly worse than showing the content.
-func computeLayout(w, h int) layout {
+func computeLayout(w, h, alertRows int) layout {
 	var l layout
 	if h < 8 || w < 24 {
 		return l
@@ -54,7 +58,15 @@ func computeLayout(w, h int) layout {
 		l.HasMenu = true
 		top = 2
 	}
-	l.Body = Rect{X: 0, Y: top, W: w, H: h - top - 1}
+	// The alert banner takes a row off the top of the body, but only when the
+	// body can spare it: a banner that squeezes the workspace out of existence
+	// is worse than no banner.
+	if alertRows > 0 && h-top-alertRows-1 < 4 {
+		alertRows = 0
+	}
+	l.HasAlert = alertRows > 0
+	l.AlertY = top
+	l.Body = Rect{X: 0, Y: top + alertRows, W: w, H: h - top - alertRows - 1}
 	col := 0
 	if w >= 62 {
 		l.HasRail = true
@@ -76,16 +88,23 @@ func computeLayout(w, h int) layout {
 func (i *Interpreter) Render(s *Snapshot, st *UIState) *Buffer {
 	w, h := st.Width, st.Height
 	b := NewBuffer(w, h)
-	l := computeLayout(w, h)
+	now := s.Now
+	alertRows := 0
+	if st.Alert.Active(now) {
+		alertRows = 1
+	}
+	l := computeLayout(w, h, alertRows)
 	if l.Body.Empty() {
 		msg := "terminal too small for the cage (need at least 24x8)"
 		b.WriteClipped(0, h/2, w, msg, Style{Fg: i.Theme.Palette.Warning})
 		return b
 	}
-	now := s.Now
 	i.topBar(b, s, st, w)
 	if l.HasMenu {
 		i.menuBar(b, s, st, w)
+	}
+	if l.HasAlert {
+		i.alertBanner(b, st.Alert, w, l.AlertY, now)
 	}
 	i.rail(b, s, st, l)
 	if l.HasSide {
@@ -103,6 +122,9 @@ func (i *Interpreter) Render(s *Snapshot, st *UIState) *Buffer {
 	// Notices draw last so a warning sits above the content it reports on and
 	// is never hidden behind a panel.
 	i.toasts(b, s, st)
+	// The isolation evidence sits above the toasts but below the modals: it is
+	// a fact the user may want to read while a dialog is open, not a blocker.
+	i.isolationPanel(b, s.Confinement, st, now)
 	// The dropdown is drawn above the workspace but below the modal overlays: a
 	// menu is a shortcut, and a confirmation about something the menu started
 	// must not be half-covered by it.
