@@ -5,7 +5,10 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/wioos28/sbt/internal/config"
 	"github.com/wioos28/sbt/internal/journal"
+	"github.com/wioos28/sbt/internal/platform"
+	"github.com/wioos28/sbt/internal/security"
 	"github.com/wioos28/sbt/internal/shared/policy"
 	"github.com/wioos28/sbt/internal/tui"
 	"github.com/wioos28/sbt/internal/version"
@@ -55,6 +58,21 @@ func RunSessionWith(ctx context.Context, in, out *os.File) int {
 	// The runner is the only component that starts sandboxes. It is bound to the
 	// screen so a run can hand the real terminal to the command and take it
 	// back, and to the store so captured files land in the session workspace.
+	// Settings are read before the first frame so the startup sequence already
+	// honours them: an animation the user turned off must not play for one
+	// second first.
+	cfg, cfgErr := config.Load()
+	if cfgErr != nil {
+		cfg = config.DefaultSettings()
+	}
+	app.SetBootOptions(boolSetting(cfg, "anim.startup", true), boolSetting(cfg, "ui.welcome", true))
+	if name, ok := cfg.GetString("ui.palette"); ok {
+		app.Theme.SetPreset(name)
+		app.Interp.Theme = app.Theme
+		app.Screen.SetTheme(app.Theme)
+	}
+	app.BootStage("Initializing SBT", "workspace "+store.WorkspaceDir(), true)
+
 	run := newRunner(store, in, out)
 	run.SetScreen(app.Screen)
 
@@ -71,7 +89,22 @@ func RunSessionWith(ctx context.Context, in, out *os.File) int {
 	// rather than with an empty panel. A failure here is not fatal: the session
 	// opens showing exactly why nothing can run.
 	sess.Refresh()
-	run.SetCaps(sess.Caps())
+	caps := sess.Caps()
+	run.SetCaps(caps)
+
+	// Each stage below records work that has actually completed. The stage is
+	// appended after the step, never before it, so the boot screen cannot show
+	// a check for something SBT has not done yet.
+	app.BootStage("Checking environment", bootCapsDetail(caps), caps != nil)
+	app.BootStage("Checking sandbox", bootCageDetail(caps), bootCageOK(caps))
+	rep := security.Permissions(caps)
+	allowed, limited, denied := rep.Summary()
+	app.BootStage("Checking permissions",
+		fmt.Sprintf("%d allowed - %d limited - %d denied", allowed, limited, denied), true)
+	app.BootStage("Loading configuration", "from "+config.Path(), cfgErr == nil)
+	tw, th := app.Screen.Size()
+	app.BootStage("Starting terminal", fmt.Sprintf("%dx%d", tw, th), true)
+	app.BootStage("Ready", "", true)
 
 	// Each frame re-reads the probe report, the journal and the monitor, so the
 	// interface always shows the current state rather than a snapshot taken at
@@ -120,4 +153,40 @@ func RunSessionWith(ctx context.Context, in, out *os.File) int {
 		return 1
 	}
 	return 0
+}
+
+// boolSetting reads a boolean preference, falling back to def when the key is
+// missing or of the wrong type. A malformed setting must not stop the session
+// from opening: the user can fix it from the Settings view.
+func boolSetting(cfg *config.Settings, key string, def bool) bool {
+	if v, ok := cfg.GetBool(key); ok {
+		return v
+	}
+	return def
+}
+
+// bootCapsDetail is the evidence line for the environment stage.
+func bootCapsDetail(caps *platform.Capabilities) string {
+	if caps == nil {
+		return "probe unavailable"
+	}
+	out := caps.OS + "/" + caps.Arch
+	if caps.Kernel != "" {
+		out += " " + caps.Kernel
+	}
+	return out
+}
+
+// bootCageDetail is the evidence line for the sandbox stage.
+func bootCageDetail(caps *platform.Capabilities) string {
+	if caps == nil || caps.Backend == "" {
+		return "no verified backend"
+	}
+	return caps.Backend + " " + caps.OverallLevel().Label()
+}
+
+// bootCageOK reports whether a backend was actually verified. An unverified
+// host is recorded as a failed stage, never as a passing one.
+func bootCageOK(caps *platform.Capabilities) bool {
+	return caps != nil && caps.Backend != ""
 }
